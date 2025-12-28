@@ -785,7 +785,11 @@
         }
 
         function createCardHTML(file, index) {
-            const fileUrl = `/api/share/${state.shareHash}/file/${encodeURIComponent(file.name)}`;
+        function createCardHTML(file, index) {
+            // Use file.path if available (new backend), fall back to file.name
+            const path = file.path || file.name;
+            const fileUrl = `/api/share/${state.shareHash}/file/${encodeURIComponent(path)}`;
+            const isVideo = file.type === 'video';
             const isVideo = file.type === 'video';
             const isImage = file.type === 'image';
             
@@ -852,7 +856,8 @@
 
         function updateModalContent() {
             const file = state.filteredFiles[state.currentIndex];
-            const fileUrl = `/api/share/${state.shareHash}/file/${encodeURIComponent(file.name)}`;
+            const path = file.path || file.name;
+            const fileUrl = `/api/share/${state.shareHash}/file/${encodeURIComponent(path)}`;
             
             els.modalTitle.textContent = file.name;
             els.modalMeta.textContent = `${state.currentIndex + 1} of ${state.filteredFiles.length} • ${formatSize(file.size)}`;
