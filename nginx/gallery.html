@@ -787,11 +787,9 @@
         }
 
         function createCardHTML(file, index) {
-        function createCardHTML(file, index) {
             // Use file.path if available (new backend), fall back to file.name
             const path = file.path || file.name;
             const fileUrl = `/api/share/${state.shareHash}/file/${encodeURIComponent(path)}`;
-            const isVideo = file.type === 'video';
             const isVideo = file.type === 'video';
             const isImage = file.type === 'image';
             
