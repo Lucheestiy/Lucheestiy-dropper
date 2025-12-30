@@ -74,6 +74,66 @@ def find_top_level_atom_offsets(path: Path) -> dict[str, int]:
     return offsets
 
 
+def get_video_codec(path: Path) -> str | None:
+    """Get the video codec of a file using ffprobe."""
+    try:
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return result.stdout.strip().lower()
+    except Exception:
+        pass
+    return None
+
+
+def transcode_hevc_to_h264(path: Path) -> bool:
+    """Transcode HEVC video to H.264 for browser compatibility."""
+    tmp_path = path.with_name(f".{path.stem}.h264{path.suffix}")
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return False
+
+    try:
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-y",
+            "-i", str(path),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-movflags", "+faststart",
+            str(tmp_path),
+        ]
+        log(f"transcoding HEVC to H.264: {path.name}")
+        subprocess.run(cmd, check=True, timeout=3600)  # 1 hour timeout
+
+        os.chmod(tmp_path, st.st_mode)
+        os.replace(tmp_path, path)
+        log(f"transcoding complete: {path.name}")
+        return True
+    except subprocess.TimeoutExpired:
+        log(f"transcoding timed out: {path.name}")
+    except Exception as exc:
+        log(f"transcoding failed for {path.name}: {exc}")
+
+    try:
+        tmp_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return False
+
+
 def faststart_in_place(path: Path) -> bool:
     tmp_path = path.with_name(f".{path.stem}.faststart{path.suffix}")
     try:
@@ -142,6 +202,13 @@ def main() -> int:
     moov_offset = offsets.get("moov")
     mdat_offset = offsets.get("mdat")
 
+    # First check for HEVC and transcode to H.264 for browser compatibility
+    codec = get_video_codec(path)
+    if codec in ("hevc", "h265"):
+        log(f"detected HEVC codec, transcoding to H.264: {path.name}")
+        transcode_hevc_to_h264(path)
+        return 0  # transcoding already includes faststart
+
     if moov_offset is None or mdat_offset is None:
         return 0
 
@@ -152,6 +219,7 @@ def main() -> int:
     ok = faststart_in_place(path)
     if ok:
         log(f"done: {path.name}")
+
     return 0
 
 
