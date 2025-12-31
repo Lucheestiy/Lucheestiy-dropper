@@ -16,6 +16,21 @@ def log(message: str) -> None:
 VIDEO_META_DB_PATH = os.environ.get("DROPPR_VIDEO_META_DB_PATH", "/database/droppr-video-meta.sqlite3")
 WATCH_DIR = os.environ.get("WATCH_DIR", "/srv")
 FFPROBE_TIMEOUT_SECONDS = int(os.environ.get("DROPPR_VIDEO_META_FFPROBE_TIMEOUT_SECONDS", "30"))
+FASTSTART_FFMPEG_TIMEOUT_SECONDS = int(os.environ.get("DROPPR_FASTSTART_FFMPEG_TIMEOUT_SECONDS", "7200"))
+FASTSTART_X264_PRESET = (os.environ.get("DROPPR_FASTSTART_X264_PRESET", "slow") or "slow").strip()
+FASTSTART_X264_CRF = int(os.environ.get("DROPPR_FASTSTART_X264_CRF", "16"))
+FASTSTART_AAC_BITRATE = (os.environ.get("DROPPR_FASTSTART_AAC_BITRATE", "256k") or "256k").strip()
+FASTSTART_COPY_AUDIO = (os.environ.get("DROPPR_FASTSTART_COPY_AUDIO", "true") or "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+)
+
+
+def _clamp_int(value: int, *, min_value: int, max_value: int) -> int:
+    return max(min_value, min(int(value), max_value))
 
 
 def _safe_rel_db_path(abs_path: Path) -> str:
@@ -458,7 +473,7 @@ def has_timestamp_errors(path: Path) -> bool:
 
 
 def fix_video_errors(path: Path) -> bool:
-    """Re-encode video to fix timestamp and other errors."""
+    """Fix playback issues by remuxing (preferred) or re-encoding (fallback)."""
     tmp_path = path.with_name(f".{path.stem}.fixed{path.suffix}")
     try:
         st = path.stat()
@@ -466,23 +481,91 @@ def fix_video_errors(path: Path) -> bool:
         return False
 
     try:
-        cmd = [
+        # Try a lossless remux first (keeps original video quality).
+        # This also drops extra streams (e.g., iPhone metadata/data tracks) by only mapping v:0 + a:?.
+        remux_cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "error",
+            "-loglevel",
+            "error",
             "-y",
-            "-i", str(path),
-            "-map", "0:v:0",  # Only first video stream
-            "-map", "0:a:0?",  # Only first audio stream (optional)
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "23",
-            "-c:a", "aac",
-            "-movflags", "+faststart",
+            "-fflags",
+            "+genpts",
+            "-i",
+            str(path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
+            "-sn",
+            "-dn",
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
             str(tmp_path),
         ]
-        log(f"fixing video errors: {path.name}")
-        subprocess.run(cmd, check=True, timeout=3600)
+
+        log(f"fixing video errors (remux): {path.name}")
+        remux_result = subprocess.run(remux_cmd, capture_output=True, text=True, timeout=FASTSTART_FFMPEG_TIMEOUT_SECONDS)
+        if remux_result.returncode == 0 and not has_extra_data_streams(tmp_path) and not has_timestamp_errors(tmp_path):
+            pass
+        else:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+            # Remux failed; fall back to high-quality re-encode.
+            crf = _clamp_int(FASTSTART_X264_CRF, min_value=0, max_value=51)
+            base_cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(path),
+                "-map",
+                "0:v:0",  # Only first video stream
+                "-map",
+                "0:a:0?",  # Only first audio stream (optional)
+                "-sn",
+                "-dn",
+                "-c:v",
+                "libx264",
+                "-preset",
+                FASTSTART_X264_PRESET,
+                "-crf",
+                str(crf),
+                "-pix_fmt",
+                "yuv420p",
+                "-profile:v",
+                "high",
+                "-movflags",
+                "+faststart",
+                str(tmp_path),
+            ]
+
+            log(f"fixing video errors (re-encode): {path.name}")
+
+            attempts: list[list[str]] = []
+            if FASTSTART_COPY_AUDIO:
+                attempts.append(base_cmd[:-3] + ["-c:a", "copy"] + base_cmd[-3:])
+            attempts.append(base_cmd[:-3] + ["-c:a", "aac", "-b:a", FASTSTART_AAC_BITRATE] + base_cmd[-3:])
+
+            last_err: str | None = None
+            for cmd in attempts:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=FASTSTART_FFMPEG_TIMEOUT_SECONDS)
+                if result.returncode == 0:
+                    break
+                last_err = (result.stderr or "").strip() or f"ffmpeg exited {result.returncode}"
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            else:
+                raise RuntimeError(last_err or "ffmpeg failed")
 
         os.chmod(tmp_path, st.st_mode)
         os.utime(tmp_path, (st.st_atime, st.st_mtime))
@@ -510,21 +593,55 @@ def transcode_hevc_to_h264(path: Path) -> bool:
         return False
 
     try:
-        cmd = [
+        crf = _clamp_int(FASTSTART_X264_CRF, min_value=0, max_value=51)
+        base_cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "error",
+            "-loglevel",
+            "error",
             "-y",
-            "-i", str(path),
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "23",
-            "-c:a", "aac",
-            "-movflags", "+faststart",
+            "-i",
+            str(path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
+            "-sn",
+            "-dn",
+            "-c:v",
+            "libx264",
+            "-preset",
+            FASTSTART_X264_PRESET,
+            "-crf",
+            str(crf),
+            "-pix_fmt",
+            "yuv420p",
+            "-profile:v",
+            "high",
+            "-movflags",
+            "+faststart",
             str(tmp_path),
         ]
+
+        attempts: list[list[str]] = []
+        if FASTSTART_COPY_AUDIO:
+            attempts.append(base_cmd[:-3] + ["-c:a", "copy"] + base_cmd[-3:])
+        attempts.append(base_cmd[:-3] + ["-c:a", "aac", "-b:a", FASTSTART_AAC_BITRATE] + base_cmd[-3:])
+
         log(f"transcoding HEVC to H.264: {path.name}")
-        subprocess.run(cmd, check=True, timeout=3600)  # 1 hour timeout
+
+        last_err: str | None = None
+        for cmd in attempts:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=FASTSTART_FFMPEG_TIMEOUT_SECONDS)
+            if result.returncode == 0:
+                break
+            last_err = (result.stderr or "").strip() or f"ffmpeg exited {result.returncode}"
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        else:
+            raise RuntimeError(last_err or "ffmpeg failed")
 
         os.chmod(tmp_path, st.st_mode)
         os.utime(tmp_path, (st.st_atime, st.st_mtime))

@@ -26,6 +26,13 @@ Many iPhone `.mov` uploads store the `moov` atom at the end of the file, which m
 
 This stack includes a `droppr-faststart` service that automatically fixes new `.mov/.mp4/.m4v` uploads by moving `moov` to the front **without re-encoding**.
 
+Some uploads require re-encoding for compatibility (notably HEVC/H.265 → H.264). Droppr is configured to prioritize visual quality (even if the file gets larger). You can tune the encoder via env vars used by the `faststart` service:
+
+- `DROPPR_FASTSTART_X264_CRF` (default: `16`) — lower = higher quality/larger files
+- `DROPPR_FASTSTART_X264_PRESET` (default: `slow`) — slower = better compression (more CPU/time)
+- `DROPPR_FASTSTART_COPY_AUDIO` (default: `true`) — tries to copy audio stream; falls back to AAC if needed
+- `DROPPR_FASTSTART_AAC_BITRATE` (default: `256k`) — used when audio must be re-encoded
+
 ## Video Metadata (Original vs Processed)
 
 Some uploads are modified by `droppr-faststart` (e.g., HEVC → H.264 transcode, timestamp fixes, or faststart). Droppr records the **original** and **post-processing** metadata (size, resolution, codecs, duration) to `./database/droppr-video-meta.sqlite3` and shows it in a small “Video details” panel when previewing a video in the File Browser UI.
