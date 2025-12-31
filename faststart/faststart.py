@@ -93,6 +93,72 @@ def get_video_codec(path: Path) -> str | None:
     return None
 
 
+def has_timestamp_errors(path: Path) -> bool:
+    """Check if video has timestamp/dts errors that cause playback issues."""
+    try:
+        cmd = [
+            "ffmpeg",
+            "-v", "error",
+            "-i", str(path),
+            "-f", "null",
+            "-t", "10",  # Only check first 10 seconds for speed
+            "-",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        stderr = result.stderr.lower()
+        # Check for common timestamp issues
+        if "non monotonically increasing dts" in stderr:
+            return True
+        if "invalid dts" in stderr:
+            return True
+        if "discarding invalid" in stderr:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def fix_video_errors(path: Path) -> bool:
+    """Re-encode video to fix timestamp and other errors."""
+    tmp_path = path.with_name(f".{path.stem}.fixed{path.suffix}")
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return False
+
+    try:
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-y",
+            "-i", str(path),
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-movflags", "+faststart",
+            str(tmp_path),
+        ]
+        log(f"fixing video errors: {path.name}")
+        subprocess.run(cmd, check=True, timeout=3600)
+
+        os.chmod(tmp_path, st.st_mode)
+        os.replace(tmp_path, path)
+        log(f"video fixed: {path.name}")
+        return True
+    except subprocess.TimeoutExpired:
+        log(f"fix timed out: {path.name}")
+    except Exception as exc:
+        log(f"fix failed for {path.name}: {exc}")
+
+    try:
+        tmp_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return False
+
+
 def transcode_hevc_to_h264(path: Path) -> bool:
     """Transcode HEVC video to H.264 for browser compatibility."""
     tmp_path = path.with_name(f".{path.stem}.h264{path.suffix}")
@@ -208,6 +274,12 @@ def main() -> int:
         log(f"detected HEVC codec, transcoding to H.264: {path.name}")
         transcode_hevc_to_h264(path)
         return 0  # transcoding already includes faststart
+
+    # Check for timestamp errors that cause playback/seeking issues
+    if has_timestamp_errors(path):
+        log(f"detected timestamp errors: {path.name}")
+        fix_video_errors(path)
+        return 0  # re-encoding includes faststart
 
     if moov_offset is None or mdat_offset is None:
         return 0
