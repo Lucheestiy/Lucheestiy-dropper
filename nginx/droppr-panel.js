@@ -2,7 +2,7 @@
   if (window.__dropprPanelBooted) return;
   window.__dropprPanelBooted = true;
 
-  var DROPPR_PANEL_VERSION = "21";
+  var DROPPR_PANEL_VERSION = "25";
   var ANALYTICS_BTN_ID = "droppr-analytics-btn";
   var ANALYTICS_STYLE_ID = "droppr-analytics-style";
   var SHARE_EXPIRE_STYLE_ID = "droppr-share-expire-style";
@@ -20,6 +20,12 @@
   var DEBUG_BADGE_ID = "droppr-debug-badge";
   var THEME_TOGGLE_BTN_ID = "droppr-theme-toggle";
   var THEME_PREFS_KEY = "droppr_gallery_prefs";
+  var STREAM_BTN_ID = "droppr-stream-btn";
+  var STREAM_BTN_STYLE_ID = "droppr-stream-style";
+  var STREAM_SHARE_BTN_CLASS = "droppr-stream-share-btn";
+  var STREAM_SHARE_STYLE_ID = "droppr-stream-share-style";
+  var FILES_STREAM_SHARE_BTN_CLASS = "droppr-files-stream-share-btn";
+  var FILES_STREAM_SHARE_STYLE_ID = "droppr-files-stream-share-style";
 
   var uploadBatch = null;
   var tusUploads = {};
@@ -171,6 +177,94 @@
       '<path fill="currentColor" d="M3 3h2v18H3V3zm4 10h2v8H7v-8zm4-6h2v14h-2V7zm4 4h2v10h-2V11zm4-7h2v17h-2V4z"/>' +
       "</svg>" +
       '<span class="label">Analytics</span>';
+
+    document.body.appendChild(a);
+  }
+
+  // ============ STREAM GALLERY BUTTON ============
+  function ensureStreamButtonStyles() {
+    if (document.getElementById(STREAM_BTN_STYLE_ID)) return;
+    var style = document.createElement("style");
+    style.id = STREAM_BTN_STYLE_ID;
+    style.textContent =
+      "#" + STREAM_BTN_ID + " {\n" +
+      "  position: fixed;\n" +
+      "  bottom: 76px;\n" +
+      "  right: 16px;\n" +
+      "  z-index: 9999;\n" +
+      "  display: flex;\n" +
+      "  align-items: center;\n" +
+      "  gap: 6px;\n" +
+      "  padding: 10px 14px;\n" +
+      "  background: #6366f1;\n" +
+      "  color: #fff;\n" +
+      "  border: none;\n" +
+      "  border-radius: 24px;\n" +
+      "  font-size: 13px;\n" +
+      "  font-weight: 600;\n" +
+      "  text-decoration: none;\n" +
+      "  cursor: pointer;\n" +
+      "  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);\n" +
+      "  transition: all 0.2s ease;\n" +
+      "}\n" +
+      "#" + STREAM_BTN_ID + ":hover {\n" +
+      "  background: #818cf8;\n" +
+      "  transform: translateY(-2px);\n" +
+      "  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.5);\n" +
+      "}\n" +
+      "#" + STREAM_BTN_ID + " .icon {\n" +
+      "  width: 18px;\n" +
+      "  height: 18px;\n" +
+      "}\n" +
+      "#" + STREAM_BTN_ID + " .label {\n" +
+      "  line-height: 1;\n" +
+      "}\n";
+    document.head.appendChild(style);
+  }
+
+  function getShareHashFromUrl() {
+    var path = window.location.pathname || "";
+    // Match /gallery/<hash> or /media/<hash>
+    var m = path.match(/^\/(?:gallery|media)\/([A-Za-z0-9_-]+)/);
+    if (m) return m[1];
+    // Match share param in query string
+    var params = new URLSearchParams(window.location.search);
+    var share = params.get("share");
+    if (share && /^[A-Za-z0-9_-]+$/.test(share)) return share;
+    return null;
+  }
+
+  function ensureStreamButton() {
+    var existing = document.getElementById(STREAM_BTN_ID);
+    var shareHash = getShareHashFromUrl();
+    
+    // Only show on gallery pages with a share hash
+    if (!shareHash) {
+      if (existing && existing.parentNode) {
+        existing.parentNode.removeChild(existing);
+      }
+      return;
+    }
+
+    if (existing) {
+      // Update href in case hash changed
+      existing.href = "/stream/" + shareHash;
+      return;
+    }
+
+    ensureStreamButtonStyles();
+
+    var a = document.createElement("a");
+    a.id = STREAM_BTN_ID;
+    a.href = "/stream/" + shareHash;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.title = "Open Stream Gallery (optimized video player for large files)";
+    a.innerHTML =
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+      '<path fill="currentColor" d="M8 5v14l11-7z"/>' +
+      "</svg>" +
+      '<span class="label">Stream</span>';
 
     document.body.appendChild(a);
   }
@@ -627,6 +721,75 @@
       decoded = normalized;
     }
     return normalizePathEncoded(decoded);
+  }
+
+  function encodePathSegmentsForApi(decodedPath) {
+    var s = String(decodedPath || "");
+    if (s && s.charAt(0) !== "/") s = "/" + s;
+    s = s.replace(/^\/+/, "/");
+    var parts = s.split("/");
+    for (var i = 0; i < parts.length; i++) {
+      if (!parts[i]) continue;
+      parts[i] = encodeURIComponent(parts[i]);
+    }
+    return parts.join("/");
+  }
+
+  function getSelectedFilesRowEl() {
+    var listing = document.getElementById("listing") || document.getElementById("app") || document.body;
+    if (!listing || !listing.querySelector) return null;
+
+    return (
+      listing.querySelector(".row.list-item.active") ||
+      listing.querySelector(".v-list-item--active") ||
+      listing.querySelector("tr.active, tr.selected") ||
+      listing.querySelector(".item.active, .item.selected") ||
+      listing.querySelector(".file.active, .file.selected") ||
+      listing.querySelector('[aria-selected="true"]')
+    );
+  }
+
+  function extractSelectedPathFromFilesRow(rowEl) {
+    if (!rowEl || !rowEl.querySelectorAll) return null;
+
+    var dirPath = getFilesDirPath();
+    var bestPath = null;
+
+    var anchors = rowEl.querySelectorAll("a[href]");
+    for (var i = 0; i < anchors.length; i++) {
+      var href = anchors[i] && anchors[i].getAttribute ? anchors[i].getAttribute("href") : null;
+      var p = extractFilesPathFromHref(href);
+      if (!p) continue;
+      if (p === dirPath) continue;
+      if (!bestPath || p.length > bestPath.length) bestPath = p;
+    }
+
+    if (bestPath) return bestPath;
+
+    var nameEl =
+      rowEl.querySelector(".name") ||
+      rowEl.querySelector(".v-list-item__title") ||
+      rowEl.querySelector(".filename") ||
+      rowEl.querySelector(".file-name") ||
+      null;
+    var nameText = nameEl && nameEl.textContent ? String(nameEl.textContent || "").trim() : "";
+    if (!nameText) {
+      // Fallback: pick the first reasonable text node.
+      var candidates = rowEl.querySelectorAll("a, span, div, td, p");
+      for (var c = 0; c < candidates.length; c++) {
+        var t = String(candidates[c].textContent || "").trim();
+        if (!t) continue;
+        if (t.length > 200) continue;
+        // Skip common size/time patterns.
+        if (/^\d+(\.\d+)?\s*(B|KB|MB|GB|TB)$/i.test(t)) continue;
+        if (/ago$/.test(t)) continue;
+        nameText = t;
+        break;
+      }
+    }
+
+    if (!nameText) return null;
+    return joinPaths(dirPath, nameText);
   }
 
   function findVideoNameElementInRow(rowEl) {
@@ -1659,6 +1822,242 @@
     }
   }
 
+  function ensureShareDialogStreamButtons() {
+    if (!isLoggedIn()) return;
+
+    var dialogs = document.querySelectorAll
+      ? document.querySelectorAll(".v-dialog__content--active, .v-dialog--active, [role=\"dialog\"]")
+      : [];
+    if (!dialogs || dialogs.length === 0) return;
+
+    ensureStreamShareStyles();
+
+    for (var d = 0; d < dialogs.length; d++) {
+      var dialog = dialogs[d];
+      if (!dialog || !dialog.querySelectorAll) continue;
+
+      // Skip our own toast/modal UI
+      if (dialog.id === AUTO_SHARE_MODAL_ID) continue;
+
+      var copyButtons = dialog.querySelectorAll("button.copy-clipboard");
+      for (var i = 0; i < copyButtons.length; i++) {
+        var copyBtn = copyButtons[i];
+        if (!copyBtn || !copyBtn.parentNode) continue;
+
+        var host = copyBtn.parentNode;
+        if (host.querySelector && host.querySelector("." + STREAM_SHARE_BTN_CLASS)) continue;
+
+        var shareHash = findShareHashNearEl(copyBtn);
+        if (!shareHash) continue;
+
+        var streamBtn = copyBtn.cloneNode(true);
+        if (streamBtn.classList && streamBtn.classList.remove) streamBtn.classList.remove("copy-clipboard");
+        streamBtn.className = String(streamBtn.className || "").replace(/\bcopy-clipboard\b/g, "").trim();
+        streamBtn.className = (streamBtn.className ? (streamBtn.className + " ") : "") + STREAM_SHARE_BTN_CLASS;
+        streamBtn.type = "button";
+        streamBtn.title = "Stream Gallery link";
+        streamBtn.setAttribute("aria-label", "Stream Gallery link");
+        setMaterialIconText(streamBtn, "smart_display");
+
+        (function (hash, btnEl) {
+          btnEl.addEventListener("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            var streamUrl = buildStreamUrl(hash);
+            var shareUrl = buildShareUrl(hash);
+
+            showAutoShareModal({
+              title: "Stream Gallery link",
+              subtitle: "",
+              urlLabel: "Stream Gallery (best for big videos):",
+              url: streamUrl,
+              openUrl: streamUrl,
+              streamLabel: "Standard share link (gallery):",
+              streamUrl: shareUrl,
+              note: "Tip: If iOS video scrubbing is slow, use the Stream link.",
+              autoCopy: true,
+              autoCopyValue: streamUrl,
+            });
+          });
+        })(shareHash, streamBtn);
+
+        host.insertBefore(streamBtn, copyBtn.nextSibling);
+      }
+    }
+  }
+
+  function ensureFilesStreamShareButton() {
+    if (!isLoggedIn()) return;
+    if (!isFilesPage()) return;
+
+    ensureStreamShareStyles();
+
+    function isInDialogOrMenu(el) {
+      try {
+        return !!(
+          el &&
+          el.closest &&
+          (el.closest(".v-dialog__content--active") ||
+            el.closest(".v-dialog--active") ||
+            el.closest(".v-menu__content") ||
+            el.closest("[role=\"dialog\"]"))
+        );
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function isVisible(el) {
+      if (!el) return false;
+      try {
+        if (el.offsetParent) return true;
+        var rect = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+        return !!(rect && rect.width > 0 && rect.height > 0);
+      } catch (e) {
+        return true;
+      }
+    }
+
+    function attachToShareButton(shareBtn) {
+      if (!shareBtn) return false;
+      if (shareBtn.classList && shareBtn.classList.contains(FILES_STREAM_SHARE_BTN_CLASS)) return false;
+      if (isInDialogOrMenu(shareBtn)) return false;
+      if (!isVisible(shareBtn)) return false;
+
+      var host = shareBtn.parentNode;
+      if (!host || !host.insertBefore) return false;
+
+      var disabled =
+        !!shareBtn.disabled ||
+        shareBtn.getAttribute("disabled") != null ||
+        shareBtn.getAttribute("aria-disabled") === "true" ||
+        (shareBtn.classList && shareBtn.classList.contains("v-btn--disabled"));
+
+      var existing = host.querySelector ? host.querySelector("." + FILES_STREAM_SHARE_BTN_CLASS) : null;
+      if (existing) {
+        existing.disabled = disabled;
+        try {
+          if (existing.classList) {
+            if (disabled) existing.classList.add("v-btn--disabled");
+            else existing.classList.remove("v-btn--disabled");
+          }
+        } catch (e3) {
+          // ignore
+        }
+
+        try {
+          existing.style.display = shareBtn.style && shareBtn.style.display === "none" ? "none" : "";
+        } catch (e4) {
+          // ignore
+        }
+        return true;
+      }
+
+      var newBtn = shareBtn.cloneNode(true);
+      if (newBtn.classList && newBtn.classList.add) newBtn.classList.add(FILES_STREAM_SHARE_BTN_CLASS);
+      newBtn.title = "Stream Share";
+      newBtn.setAttribute("aria-label", "Stream Share");
+      setMaterialIconText(newBtn, "smart_display");
+      newBtn.disabled = disabled;
+
+      newBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        var rowEl = getSelectedFilesRowEl();
+        var decodedPath = extractSelectedPathFromFilesRow(rowEl);
+        if (!decodedPath) {
+          showAutoShareModal({
+            title: "Select a file or folder",
+            subtitle: "",
+            url: "",
+            note: "Select a file/folder in the list first, then click Stream Share again.",
+            autoCopy: false,
+          });
+          return;
+        }
+
+        var apiPath = encodePathSegmentsForApi(decodedPath);
+        var label = String(decodedPath).split("/").pop() || decodedPath;
+
+        newBtn.disabled = true;
+        createShare(apiPath)
+          .then(function (resp) {
+            var hash = resp && resp.hash ? resp.hash : "";
+            if (!hash) throw new Error("Share response missing hash");
+
+            var streamUrl = buildStreamUrl(hash);
+            var shareUrl = buildShareUrl(hash);
+
+            showAutoShareModal({
+              title: "Stream link ready",
+              subtitle: label ? ("Selected: " + label) : "",
+              urlLabel: "Stream Gallery (best for big videos):",
+              url: streamUrl,
+              openUrl: streamUrl,
+              streamLabel: "Standard share link (gallery):",
+              streamUrl: shareUrl,
+              note: "Recipients can view without logging in.",
+              autoCopy: true,
+              autoCopyValue: streamUrl,
+            });
+          })
+          .catch(function (err) {
+            showAutoShareModal({
+              title: "Could not create share link",
+              subtitle: label ? ("Selected: " + label) : "",
+              url: "",
+              note: String(err && err.message ? err.message : err),
+              autoCopy: false,
+            });
+          })
+          .then(function () {
+            newBtn.disabled = false;
+          });
+      });
+
+      host.insertBefore(newBtn, shareBtn.nextSibling);
+      return true;
+    }
+
+    var iconNodes = document.querySelectorAll
+      ? document.querySelectorAll("i.material-icons, span.material-icons, .material-icons")
+      : [];
+    for (var i = 0; i < iconNodes.length; i++) {
+      var icon = iconNodes[i];
+      if (!icon) continue;
+      var txt = String(icon.textContent || "").trim();
+      if (txt !== "share") continue;
+
+      var shareBtn = null;
+      try {
+        shareBtn = icon.closest ? icon.closest("button, a") : null;
+      } catch (e) {
+        shareBtn = null;
+      }
+      if (attachToShareButton(shareBtn)) return;
+    }
+
+    // Fallback: find a Share button by title/aria-label/text (in case the icon isn't "share").
+    var btnCandidates = document.querySelectorAll ? document.querySelectorAll("button, a") : [];
+    for (var b = 0; b < btnCandidates.length; b++) {
+      var el = btnCandidates[b];
+      if (!el) continue;
+      if (el.classList && el.classList.contains(FILES_STREAM_SHARE_BTN_CLASS)) continue;
+      if (isInDialogOrMenu(el)) continue;
+      if (!isVisible(el)) continue;
+
+      var label = (el.getAttribute && (el.getAttribute("aria-label") || el.getAttribute("title"))) || "";
+      var labelLower = String(label || "").toLowerCase();
+      var textLower = String(el.textContent || "").trim().toLowerCase();
+
+      if (labelLower.indexOf("share") === -1 && textLower !== "share") continue;
+
+      if (attachToShareButton(el)) return;
+    }
+  }
+
   function ensureAutoShareStyles() {
     if (document.getElementById(AUTO_SHARE_STYLE_ID)) return;
 
@@ -1815,6 +2214,90 @@
     });
   }
 
+  function extractShareHashFromText(text) {
+    var s = String(text || "");
+
+    var m = s.match(/\/api\/public\/dl\/([A-Za-z0-9_-]{1,64})/);
+    if (m && m[1]) return m[1];
+
+    m = s.match(/\/(?:share|gallery|stream)\/([A-Za-z0-9_-]{1,64})/);
+    if (m && m[1]) return m[1];
+
+    m = s.match(/(?:^|[?&])share=([A-Za-z0-9_-]{1,64})(?:&|$)/);
+    if (m && m[1]) return m[1];
+
+    if (/^[A-Za-z0-9_-]{1,64}$/.test(s)) return s;
+    return null;
+  }
+
+  function buildShareUrl(shareHash) {
+    return window.location.origin + "/api/public/dl/" + shareHash;
+  }
+
+  function buildGalleryUrl(shareHash) {
+    return window.location.origin + "/gallery/" + shareHash;
+  }
+
+  function buildStreamUrl(shareHash) {
+    return window.location.origin + "/stream/" + shareHash;
+  }
+
+  function findShareHashNearEl(el) {
+    if (!el) return null;
+
+    var attrs = ["data-clipboard-text", "data-clipboardText", "data-copy", "data-text"];
+    for (var i = 0; i < attrs.length; i++) {
+      var v = el.getAttribute ? el.getAttribute(attrs[i]) : null;
+      var h = extractShareHashFromText(v);
+      if (h) return h;
+    }
+
+    // Scan up a few levels and look for share links/inputs.
+    var cur = el;
+    for (var depth = 0; depth < 5 && cur; depth++) {
+      if (cur.querySelectorAll) {
+        var inputs = cur.querySelectorAll("input");
+        for (var ii = 0; ii < inputs.length; ii++) {
+          var iv = inputs[ii] && inputs[ii].value;
+          var ih = extractShareHashFromText(iv);
+          if (ih) return ih;
+        }
+
+        var anchors = cur.querySelectorAll("a[href]");
+        for (var ai = 0; ai < anchors.length; ai++) {
+          var href = anchors[ai] && anchors[ai].getAttribute ? anchors[ai].getAttribute("href") : null;
+          var ah = extractShareHashFromText(href);
+          if (ah) return ah;
+        }
+      }
+
+      cur = cur.parentNode;
+    }
+
+    return null;
+  }
+
+  function setMaterialIconText(btn, iconText) {
+    if (!btn) return;
+    var icon = btn.querySelector
+      ? (btn.querySelector("i.material-icons") || btn.querySelector(".material-icons") || btn.querySelector("i"))
+      : null;
+    if (!icon) return;
+    icon.textContent = iconText;
+  }
+
+  function ensureStreamShareStyles() {
+    if (document.getElementById(STREAM_SHARE_STYLE_ID)) return;
+    var style = document.createElement("style");
+    style.id = STREAM_SHARE_STYLE_ID;
+    style.textContent =
+      "." + STREAM_SHARE_BTN_CLASS + " { margin-left: 6px; }\n" +
+      "." + STREAM_SHARE_BTN_CLASS + "[disabled] { opacity: 0.55; cursor: not-allowed; }\n" +
+      "." + FILES_STREAM_SHARE_BTN_CLASS + " { margin-left: 6px; }\n" +
+      "." + FILES_STREAM_SHARE_BTN_CLASS + "[disabled] { opacity: 0.55; cursor: not-allowed; }\n";
+    document.head.appendChild(style);
+  }
+
   function showAutoShareModal(opts) {
     ensureAutoShareStyles();
     dismissAutoShareModal();
@@ -1849,6 +2332,15 @@
 
     var body = document.createElement("div");
     body.className = "body";
+
+    if (opts.urlLabel) {
+      var urlLabel = document.createElement("div");
+      urlLabel.style.fontSize = "0.8rem";
+      urlLabel.style.color = "var(--text-muted, #888)";
+      urlLabel.style.marginBottom = "0.35rem";
+      urlLabel.textContent = String(opts.urlLabel || "");
+      body.appendChild(urlLabel);
+    }
 
     var row = document.createElement("div");
     row.className = "row";
@@ -1907,6 +2399,59 @@
 
     body.appendChild(row);
 
+    // Stream Gallery row (for video-optimized player)
+    if (opts.streamUrl) {
+      var streamRow = document.createElement("div");
+      streamRow.className = "row";
+      streamRow.style.marginTop = "0.75rem";
+
+      var streamLabel = document.createElement("div");
+      streamLabel.style.fontSize = "0.8rem";
+      streamLabel.style.color = "var(--text-muted, #888)";
+      streamLabel.style.marginBottom = "0.35rem";
+      streamLabel.textContent = opts.streamLabel || "Stream Gallery (optimized for large videos):";
+      
+      var streamInput = document.createElement("input");
+      streamInput.type = "text";
+      streamInput.readOnly = true;
+      streamInput.value = opts.streamUrl;
+      streamInput.addEventListener("focus", function () {
+        try { streamInput.select(); } catch (e) {}
+      });
+
+      var streamCopyBtn = document.createElement("button");
+      streamCopyBtn.type = "button";
+      streamCopyBtn.className = "btn";
+      streamCopyBtn.textContent = "Copy";
+      streamCopyBtn.addEventListener("click", function () {
+        copyText(streamInput.value)
+          .then(function () {
+            streamCopyBtn.textContent = "Copied";
+            setTimeout(function () {
+              if (document.body.contains(streamCopyBtn)) streamCopyBtn.textContent = "Copy";
+            }, 1200);
+          })
+          .catch(function () {
+            try { streamInput.focus(); streamInput.select(); } catch (e) {}
+          });
+      });
+
+      var streamOpenBtn = document.createElement("button");
+      streamOpenBtn.type = "button";
+      streamOpenBtn.className = "btn secondary";
+      streamOpenBtn.textContent = "Open";
+      streamOpenBtn.addEventListener("click", function () {
+        try { window.open(opts.streamUrl, "_blank", "noopener"); }
+        catch (e) { window.location.href = opts.streamUrl; }
+      });
+
+      body.appendChild(streamLabel);
+      streamRow.appendChild(streamInput);
+      streamRow.appendChild(streamCopyBtn);
+      streamRow.appendChild(streamOpenBtn);
+      body.appendChild(streamRow);
+    }
+
     var note = document.createElement("div");
     note.className = "note";
     note.textContent = opts.note || "";
@@ -1924,7 +2469,8 @@
     }
 
     if (opts.autoCopy && opts.url) {
-      copyText(opts.url)
+      var valueToCopy = opts.autoCopyValue || opts.url;
+      copyText(valueToCopy)
         .then(function () {
           copyBtn.textContent = "Copied";
           setTimeout(function () {
@@ -2219,6 +2765,7 @@
           subtitle: fileLabel ? ("Uploaded: " + fileLabel) : "",
           url: shareUrl,
           openUrl: window.location.origin + "/gallery/" + resp.hash,
+          streamUrl: window.location.origin + "/stream/" + resp.hash,
           note: "Recipients can view without logging in.",
           autoCopy: true,
         });
@@ -2926,11 +3473,15 @@
     ensureThemeToggle();
     ensureAnalyticsButton();
     ensureShareExpireButtons();
+    ensureShareDialogStreamButtons();
+    ensureFilesStreamShareButton();
     startVideoMetaWatcher();
     scheduleFilesVideoHydrate();
     var observer = new MutationObserver(function () {
       ensureAnalyticsButton();
       ensureShareExpireButtons();
+      ensureShareDialogStreamButtons();
+      ensureFilesStreamShareButton();
       scheduleFilesVideoHydrate();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -2938,6 +3489,7 @@
     filesVideoLastPathname = String(window.location && window.location.pathname);
     setInterval(function () {
       if (!isFilesPage()) return;
+      ensureFilesStreamShareButton();
       var cur = String(window.location && window.location.pathname);
       if (cur !== filesVideoLastPathname) {
         filesVideoLastPathname = cur;

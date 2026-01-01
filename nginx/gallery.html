@@ -1162,6 +1162,7 @@
 
             <button class="action-btn secondary" id="detailsBtn" title="Toggle video details">ℹ Details</button>
             <button class="action-btn secondary" id="copyLinkBtn">🔗 Share</button>
+            <button class="action-btn secondary" id="streamBtn" title="Open Stream Gallery (optimized video player)">▶ Stream</button>
             <button class="action-btn secondary" id="refreshBtn" title="Refresh. Shift+click = hard reload">🔄 Refresh</button>
             <a href="#" id="downloadAllBtn" class="action-btn">⬇️ Download All</a>
         </div>
@@ -1315,6 +1316,7 @@
             els.modalMeta = document.getElementById('modalMeta');
             els.downloadAll = document.getElementById('downloadAllBtn');
             els.copyLink = document.getElementById('copyLinkBtn');
+            els.streamBtn = document.getElementById('streamBtn');
             els.refresh = document.getElementById('refreshBtn');
             els.details = document.getElementById('detailsBtn');
             els.backToTop = document.getElementById('backToTop');
@@ -2200,6 +2202,12 @@
             els.copyLink.onclick = async () => {
                 const success = await copyToClipboard(window.location.href);
                 showToast(success ? 'Link copied' : 'Copy failed - select and copy manually');
+            };
+
+            // Stream Gallery button
+            els.streamBtn.onclick = () => {
+                const streamUrl = '/stream/' + state.shareHash;
+                window.open(streamUrl, '_blank');
             };
 
             // Refresh
