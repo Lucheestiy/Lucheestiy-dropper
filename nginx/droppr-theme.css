@@ -604,8 +604,79 @@ body.light-theme {
 /* Snackbar/Toast */
 [data-theme="light"] .v-snack__wrapper,
 .light-theme .v-snack__wrapper {
-    background-color: #1e293b !important;
-    color: #f1f5f9 !important;
+    background-color: #ffffff !important;
+    color: #1e293b !important;
+    border: 1px solid rgba(0,0,0,0.12) !important;
+    box-shadow: 0 18px 40px -18px rgba(0,0,0,0.35) !important;
+}
+
+[data-theme="light"] .v-snack__wrapper .v-snack__content,
+.light-theme .v-snack__wrapper .v-snack__content {
+    color: #1e293b !important;
+}
+
+[data-theme="light"] .v-snack__wrapper .v-btn,
+.light-theme .v-snack__wrapper .v-btn {
+    color: #4f46e5 !important;
+}
+
+/* Vuetify often keeps `theme--dark` classes even when we toggle light mode. Override those key surfaces. */
+[data-theme="light"] .theme--dark.v-dialog,
+.light-theme .theme--dark.v-dialog,
+[data-theme="light"] .theme--dark.v-menu__content,
+.light-theme .theme--dark.v-menu__content,
+[data-theme="light"] .theme--dark.v-autocomplete__content,
+.light-theme .theme--dark.v-autocomplete__content,
+[data-theme="light"] .theme--dark.v-select-list,
+.light-theme .theme--dark.v-select-list,
+[data-theme="light"] .theme--dark.menuable__content__active,
+.light-theme .theme--dark.menuable__content__active {
+    background-color: var(--card-bg) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid var(--border-color) !important;
+    box-shadow: 0 18px 40px -18px rgba(0,0,0,0.25) !important;
+}
+
+[data-theme="light"] .theme--dark.v-card,
+.light-theme .theme--dark.v-card,
+[data-theme="light"] .theme--dark.v-sheet,
+.light-theme .theme--dark.v-sheet {
+    background-color: var(--card-bg) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+}
+
+[data-theme="light"] .theme--dark.v-list,
+.light-theme .theme--dark.v-list {
+    background-color: transparent !important;
+    color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .theme--dark.v-list-item,
+.light-theme .theme--dark.v-list-item,
+[data-theme="light"] .theme--dark.v-list-item__title,
+.light-theme .theme--dark.v-list-item__title {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .theme--dark.v-list-item__subtitle,
+.light-theme .theme--dark.v-list-item__subtitle {
+    color: var(--text-secondary) !important;
+}
+
+[data-theme="light"] .theme--dark.v-btn,
+.light-theme .theme--dark.v-btn {
+    color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .theme--dark.v-btn--contained,
+.light-theme .theme--dark.v-btn--contained {
+    color: #ffffff !important;
+}
+
+[data-theme="light"] .theme--dark.v-icon,
+.light-theme .theme--dark.v-icon {
+    color: #475569 !important;
 }
 
 /* Empty state text */
