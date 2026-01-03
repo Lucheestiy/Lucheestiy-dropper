@@ -1,4 +1,4 @@
-<!-- VERSION: 1.6.0 - Video buffer progress indicator -->
+<!-- VERSION: 1.7.1 - Base path support -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -242,20 +242,21 @@
         }
 
         .media-grid {
-            column-count: 4;
-            column-gap: 1.5rem;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 1.5rem;
         }
 
         @media (max-width: 1200px) {
-            .media-grid { column-count: 3; }
+            .media-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         }
         @media (max-width: 900px) {
-            .media-grid { column-count: 2; }
+            .media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .controls-bar { flex-direction: column; align-items: stretch; }
             .header h1 { font-size: 2rem; }
         }
         @media (max-width: 600px) {
-            .media-grid { column-count: 1; }
+            .media-grid { grid-template-columns: 1fr; }
         }
 
         .media-card {
@@ -263,7 +264,7 @@
             background: var(--card-bg);
             border-radius: 16px;
             overflow: hidden;
-            margin-bottom: 1.5rem;
+            margin-bottom: 0;
             border: 1px solid rgba(255, 255, 255, 0.05);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
             position: relative;
@@ -288,6 +289,11 @@
             height: auto;
             display: block;
             transition: transform 0.5s ease;
+        }
+
+        .media-preview.video-preview {
+            height: 200px;
+            object-fit: cover;
         }
 
         .media-card:hover .media-preview {
@@ -346,12 +352,16 @@
         }
 
         .media-meta {
-            display: flex;
+            display: none;
             justify-content: space-between;
             align-items: center;
             color: var(--text-secondary);
             font-size: 0.85rem;
             margin-top: 0.5rem;
+        }
+
+        body.show-details .media-meta {
+            display: flex;
         }
 
         .card-actions {
@@ -552,6 +562,11 @@
             color: var(--text-secondary);
         }
 
+        .file-placeholder.video-placeholder {
+            background: #000;
+            display: none;
+        }
+
         .loading {
             text-align: center;
             padding: 4rem;
@@ -610,19 +625,20 @@
 
         /* Skeleton Loading */
         .skeleton-grid {
-            column-count: 4;
-            column-gap: 1.5rem;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 1.5rem;
         }
-        @media (max-width: 1200px) { .skeleton-grid { column-count: 3; } }
-        @media (max-width: 900px) { .skeleton-grid { column-count: 2; } }
-        @media (max-width: 600px) { .skeleton-grid { column-count: 1; } }
+        @media (max-width: 1200px) { .skeleton-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 900px) { .skeleton-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 600px) { .skeleton-grid { grid-template-columns: 1fr; } }
 
         .skeleton-card {
             break-inside: avoid;
             background: var(--card-bg);
             border-radius: 16px;
             overflow: hidden;
-            margin-bottom: 1.5rem;
+            margin-bottom: 0;
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
@@ -789,14 +805,15 @@
 
         /* List View Layout */
         .media-grid.list-view {
-            column-count: 1 !important;
+            grid-template-columns: 1fr !important;
+            gap: 0.75rem;
         }
 
         .media-grid.list-view .media-card {
             display: flex;
             flex-direction: row;
             align-items: center;
-            margin-bottom: 0.75rem;
+            margin-bottom: 0;
         }
 
         .media-grid.list-view .media-preview-container {
@@ -807,7 +824,12 @@
         }
 
         .media-grid.list-view .media-preview {
-            height: 80px;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .media-grid.list-view .file-placeholder {
+            height: 100%;
         }
 
         .media-grid.list-view .media-info {
@@ -1112,7 +1134,7 @@
         }
     </style>
 </head>
-<body>
+<body class="show-details">
     <!-- Offline Banner -->
     <div id="offlineBanner" class="offline-banner">
         <span>📡</span>
@@ -1160,7 +1182,7 @@
 
             <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme" aria-label="Toggle theme">🌙</button>
 
-            <button class="action-btn secondary" id="detailsBtn" title="Toggle video details">ℹ Details</button>
+            <button class="action-btn secondary" id="detailsBtn" title="Toggle details">ℹ Details: On</button>
             <button class="action-btn secondary" id="copyLinkBtn">🔗 Share</button>
             <button class="action-btn secondary" id="streamBtn" title="Open Stream Gallery (optimized video player)">▶ Stream</button>
             <button class="action-btn secondary" id="refreshBtn" title="Refresh. Shift+click = hard reload">🔄 Refresh</button>
@@ -1267,11 +1289,12 @@
         const IS_IOS = /iPad|iPhone|iPod/.test(UA) || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
 
         // ============ STATE ============
-	        const state = {
-	            files: [],
-	            filteredFiles: [],
-	            currentIndex: 0,
+        const state = {
+            files: [],
+            filteredFiles: [],
+            currentIndex: 0,
             shareHash: null,
+            basePath: '',
             filter: 'all',
             sort: 'type_asc',
             layout: 'grid',
@@ -1380,10 +1403,22 @@
             return String(p || '').split('/').map(s => encodeURIComponent(s)).join('/');
         }
 
+        function normalizeBasePath(value) {
+            if (value == null) return '';
+            let raw = String(value || '').trim();
+            if (!raw) return '';
+            raw = raw.replace(/^\/+/, '');
+            if (!raw || raw.indexOf('\\') !== -1) return '';
+            const parts = raw.split('/').filter(Boolean);
+            if (!parts.length || parts.some(p => p === '..')) return '';
+            return parts.join('/');
+        }
+
         function formatSize(b) {
             if (!b) return '0 B';
-            const k = 1024, s = ['B', 'KB', 'MB', 'GB'];
+            const k = 1000, s = ['B', 'KB', 'MB', 'GB'];
             const i = Math.floor(Math.log(b) / Math.log(k));
+            if (i <= 0) return Math.round(b) + ' B';
             return (b / Math.pow(k, i)).toFixed(1) + ' ' + s[i];
         }
 
@@ -1898,7 +1933,7 @@
         }
         window.openModal = openModal;
 
-        // Open media with platform-aware defaults (iOS/WebKit can be more stable in a video-only page).
+        // Open media in-gallery for nav; Shift-click a video to use the standalone player.
         function openMedia(index, evt) {
             const file = state.filteredFiles[index];
             if (!file) return;
@@ -1907,11 +1942,10 @@
                 const path = file.path || file.name;
                 const url = `/player?share=${encodeURIComponent(state.shareHash)}&file=${encodeURIComponent(path)}`;
 
-                // Desktop escape hatch: Shift-click opens the in-gallery modal viewer instead of /player.
                 if (evt && evt.shiftKey) {
-                    openModal(index);
-                } else {
                     window.location.href = url;
+                } else {
+                    openModal(index);
                 }
                 return;
             }
@@ -2013,6 +2047,15 @@
         async function fetchFiles(forceRefresh = false) {
             const params = new URLSearchParams();
             if (forceRefresh) params.set('refresh', '1');
+            const recursiveParam = new URLSearchParams(window.location.search).get('recursive');
+            if (recursiveParam == null) {
+                params.set('recursive', '1');
+            } else {
+                const v = String(recursiveParam).trim().toLowerCase();
+                const flag = (v === '1' || v === 'true' || v === 'yes' || v === 'on') ? '1' : '0';
+                params.set('recursive', flag);
+            }
+            if (state.basePath) params.set('path', state.basePath);
             params.set('v', Date.now());
 
             const controller = new AbortController();
@@ -2105,10 +2148,9 @@
                              onerror="this.onerror=null;this.src=this.dataset.fallback;">`;
             } else if (isVideo) {
                 preview = `
-                    <img class="media-preview" src="${previewUrl}" loading="lazy" decoding="async" fetchpriority="low" alt="${file.name}"
-                         style="object-fit:cover;height:200px;width:100%;"
+                    <img class="media-preview video-preview" src="${previewUrl}" loading="lazy" decoding="async" fetchpriority="low" alt="${file.name}"
                          onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-                    <div class="file-placeholder" style="background:#000;display:none;height:200px;align-items:center;justify-content:center;">
+                    <div class="file-placeholder video-placeholder">
                         <div style="font-size:2.75rem">🎞️</div>
                     </div>
                     <div class="play-icon">▶</div>`;
@@ -2206,7 +2248,10 @@
 
             // Stream Gallery button
             els.streamBtn.onclick = () => {
-                const streamUrl = '/stream/' + state.shareHash;
+                let streamUrl = '/stream/' + state.shareHash;
+                if (state.basePath) {
+                    streamUrl += '?path=' + encodeURIComponent(state.basePath);
+                }
                 window.open(streamUrl, '_blank');
             };
 
@@ -2391,8 +2436,10 @@
             initTheme();
 
             // Get share hash
-            state.shareHash = new URLSearchParams(window.location.search).get('share') ||
+            const params = new URLSearchParams(window.location.search);
+            state.shareHash = params.get('share') ||
                              window.location.pathname.split('/').filter(p => p && p !== 'gallery').pop();
+            state.basePath = normalizeBasePath(params.get('path') || params.get('p')) || '';
 
             if (!state.shareHash || state.shareHash === 'gallery') {
                 els.loading.style.display = 'none';
