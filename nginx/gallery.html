@@ -1182,10 +1182,10 @@
 
             <button class="theme-toggle" id="themeToggle" title="Toggle dark/light theme" aria-label="Toggle theme">🌙</button>
 
-            <button class="action-btn secondary" id="detailsBtn" title="Toggle details">ℹ Details: On</button>
-            <button class="action-btn secondary" id="copyLinkBtn">🔗 Share</button>
-            <button class="action-btn secondary" id="streamBtn" title="Open Stream Gallery (optimized video player)">▶ Stream</button>
-            <button class="action-btn secondary" id="refreshBtn" title="Refresh. Shift+click = hard reload">🔄 Refresh</button>
+            <button class="action-btn secondary" id="detailsBtn" title="Toggle details" aria-label="Toggle file details">ℹ Details: On</button>
+            <button class="action-btn secondary" id="copyLinkBtn" aria-label="Copy share link">🔗 Share</button>
+            <button class="action-btn secondary" id="streamBtn" title="Open Stream Gallery (optimized video player)" aria-label="Open stream gallery">▶ Stream</button>
+            <button class="action-btn secondary" id="refreshBtn" title="Refresh. Shift+click = hard reload" aria-label="Refresh gallery">🔄 Refresh</button>
             <a href="#" id="downloadAllBtn" class="action-btn">⬇️ Download All</a>
         </div>
     </div>
@@ -1204,7 +1204,7 @@
             <div class="error-icon">⚠️</div>
             <h3 id="errorTitle">Failed to load gallery</h3>
             <p id="errorMessage">Please check your connection and try again.</p>
-            <button class="retry-btn" onclick="location.reload()">Try Again</button>
+            <button class="retry-btn" onclick="location.reload()" aria-label="Retry loading">Try Again</button>
         </div>
 
         <div id="galleryGrid" class="media-grid"></div>
@@ -1219,16 +1219,16 @@
     <div id="modal" class="modal" role="dialog" aria-modal="true" aria-label="Media viewer">
         <div class="modal-header">
             <div class="modal-controls">
-                <button class="icon-btn" id="zoomBtn" title="Zoom">🔍</button>
-                <button class="icon-btn" id="fullscreenBtn" title="Fullscreen">⛶</button>
-                <button class="icon-btn" id="slideshowBtn" title="Slideshow">▶</button>
-                <button class="icon-btn" id="speedBtn" title="Playback speed" style="display:none;">1x</button>
-                <button class="icon-btn danger" id="resetVideoBtn" title="Reset video (if stuck)" style="display:none;">⟳</button>
-                <a href="#" class="icon-btn" id="downloadBtn" download title="Download">⬇</a>
-                <a href="#" class="icon-btn" id="viewOriginalBtn" target="_blank" title="View Original">↗</a>
-                <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)">?</button>
+                <button class="icon-btn" id="zoomBtn" title="Zoom" aria-label="Toggle zoom">🔍</button>
+                <button class="icon-btn" id="fullscreenBtn" title="Fullscreen" aria-label="Toggle fullscreen">⛶</button>
+                <button class="icon-btn" id="slideshowBtn" title="Slideshow" aria-label="Start slideshow">▶</button>
+                <button class="icon-btn" id="speedBtn" title="Playback speed" aria-label="Change playback speed" style="display:none;">1x</button>
+                <button class="icon-btn danger" id="resetVideoBtn" title="Reset video (if stuck)" aria-label="Reset video player" style="display:none;">⟳</button>
+                <a href="#" class="icon-btn" id="downloadBtn" download title="Download" aria-label="Download file">⬇</a>
+                <a href="#" class="icon-btn" id="viewOriginalBtn" target="_blank" title="View Original" aria-label="View original file">↗</a>
+                <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)" aria-label="Show keyboard shortcuts">?</button>
             </div>
-            <button class="icon-btn" id="closeBtn" title="Close">×</button>
+            <button class="icon-btn" id="closeBtn" title="Close" aria-label="Close modal">×</button>
         </div>
 
         <button class="nav-btn nav-prev" id="prevBtn" aria-label="Previous">❮</button>

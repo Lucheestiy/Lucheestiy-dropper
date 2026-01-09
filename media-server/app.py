@@ -2924,17 +2924,6 @@ def analytics_share_export_csv(share_hash: str):
 
     since, until = _get_time_range()
 
-    with _analytics_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT event_type, file_path, ip, user_agent, referer, created_at
-            FROM download_events
-            WHERE share_hash = ? AND created_at >= ? AND created_at <= ?
-            ORDER BY created_at DESC
-            """,
-            (share_hash, since, until),
-        ).fetchall()
-
     def esc(value):
         if value is None:
             return ""
@@ -2947,24 +2936,30 @@ def analytics_share_export_csv(share_hash: str):
             return f"\"{value}\""
         return value
 
-    lines = ["event_type,file_path,ip,user_agent,referer,created_at"]
-    for row in rows:
-        lines.append(
-            ",".join(
-                [
+    def generate_csv():
+        yield "event_type,file_path,ip,user_agent,referer,created_at\n"
+        with _analytics_conn() as conn:
+            cursor = conn.execute(
+                """
+                SELECT event_type, file_path, ip, user_agent, referer, created_at
+                FROM download_events
+                WHERE share_hash = ? AND created_at >= ? AND created_at <= ?
+                ORDER BY created_at DESC
+                """,
+                (share_hash, since, until),
+            )
+            for row in cursor:
+                yield ",".join([
                     esc(row["event_type"]),
                     esc(row["file_path"]),
                     esc(row["ip"]),
                     esc(row["user_agent"]),
                     esc(row["referer"]),
                     esc(int(row["created_at"] or 0)),
-                ]
-            )
-        )
+                ]) + "\n"
 
-    csv_data = "\n".join(lines) + "\n"
     return Response(
-        csv_data,
+        generate_csv(),
         content_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="droppr-share-{share_hash}-analytics.csv"'},
     )

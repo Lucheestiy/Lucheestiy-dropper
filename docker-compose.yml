@@ -12,6 +12,17 @@ services:
       - ./config:/config
     networks:
       - default
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   droppr:
     image: nginx:1.25-alpine
@@ -31,9 +42,21 @@ services:
       - ./nginx/droppr-panel.js:/usr/share/nginx/html/droppr-panel.js:ro
       - ./database/proxy-cache:/usr/share/nginx/html/proxy-cache:ro
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     networks:
       - default
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   media-server:
     build:
@@ -51,9 +74,21 @@ services:
       - DROPPR_PROXY_CACHE_DIR=/database/proxy-cache
       - DROPPR_PROXY_MAX_CONCURRENCY=1
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     networks:
       - default
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
 
 
 networks:
