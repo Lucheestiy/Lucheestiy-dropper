@@ -10,5 +10,3 @@ data/*
 media-server/__pycache__/
 *.pyc
 
-cloudflare/creds/*
-!cloudflare/creds/.keep

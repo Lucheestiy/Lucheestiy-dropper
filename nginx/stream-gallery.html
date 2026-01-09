@@ -1,4 +1,4 @@
-<!-- VERSION: 1.0.0 - Stream Gallery - Advanced video player for large files -->
+<!-- VERSION: 1.0.1 - Stream Gallery - Base path support for subfolders -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -83,6 +83,34 @@
             background: var(--glass);
             padding: 0.25rem 0.5rem;
             border-radius: 999px;
+        }
+
+        .sidebar-options {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .sidebar-toggle-btn {
+            appearance: none;
+            background: var(--glass);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 0.35rem 0.65rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .sidebar-toggle-btn:hover { background: rgba(255,255,255,0.12); }
+
+        .sidebar-toggle-btn.active {
+            background: var(--accent);
+            border-color: var(--accent-hover);
+            color: #fff;
         }
 
         .file-list {
@@ -471,6 +499,8 @@
         }
 
         .empty-state .icon { font-size: 4rem; margin-bottom: 1rem; opacity: 0.5; }
+        .empty-state h3 { color: #fff; margin-bottom: 0.5rem; }
+        .empty-state .action-btn { margin-top: 1rem; }
 
         .sidebar-toggle {
             display: none;
@@ -540,6 +570,9 @@
                     <span class="file-count" id="fileCount">0 videos</span>
                 </div>
                 <div class="sidebar-subtitle" id="shareInfo">Loading...</div>
+                <div class="sidebar-options">
+                    <button class="sidebar-toggle-btn" id="recursiveToggle" type="button" aria-pressed="false" title="Include files from subfolders">Subfolders: Off</button>
+                </div>
             </div>
             <div class="file-list" id="fileList"></div>
         </aside>
@@ -621,8 +654,9 @@
 
                 <div class="empty-state" id="emptyState" style="display: none;">
                     <div class="icon">&#128249;</div>
-                    <h3>No Videos Found</h3>
-                    <p>This share doesn't contain any video files.</p>
+                    <h3 id="emptyTitle">No Videos Found</h3>
+                    <p id="emptyMessage">This share doesn't contain any video files.</p>
+                    <button class="action-btn" id="emptyEnableSubfolders" type="button" style="display: none;">Show Subfolders</button>
                 </div>
             </div>
         </main>
@@ -642,8 +676,36 @@
             STORAGE_KEY: 'stream_gallery_progress'
         };
 
+        const VIDEO_EXTS = {
+            '3g2': true,
+            '3gp': true,
+            asf: true,
+            avi: true,
+            flv: true,
+            m2ts: true,
+            m2v: true,
+            m4v: true,
+            mkv: true,
+            mov: true,
+            mp4: true,
+            mpe: true,
+            mpeg: true,
+            mpg: true,
+            mts: true,
+            mxf: true,
+            ogv: true,
+            ts: true,
+            vob: true,
+            webm: true,
+            wmv: true
+        };
+
         const state = {
             shareHash: null,
+            recursive: false,
+            shareMeta: null,
+            basePath: '',
+            basePathAuto: false,
             files: [],
             videoFiles: [],
             currentIndex: -1,
@@ -663,6 +725,7 @@
             fileList: document.getElementById('fileList'),
             fileCount: document.getElementById('fileCount'),
             shareInfo: document.getElementById('shareInfo'),
+            recursiveToggle: document.getElementById('recursiveToggle'),
             videoTitle: document.getElementById('videoTitle'),
             downloadBtn: document.getElementById('downloadBtn'),
             galleryBtn: document.getElementById('galleryBtn'),
@@ -691,12 +754,22 @@
             errorTitle: document.getElementById('errorTitle'),
             errorMessage: document.getElementById('errorMessage'),
             emptyState: document.getElementById('emptyState'),
+            emptyTitle: document.getElementById('emptyTitle'),
+            emptyMessage: document.getElementById('emptyMessage'),
+            emptyEnableSubfolders: document.getElementById('emptyEnableSubfolders'),
             sidebarToggle: document.getElementById('sidebarToggle'),
             sidebarBackdrop: document.getElementById('sidebarBackdrop')
         };
 
         function encodePath(p) {
             return String(p || '').split('/').map(s => encodeURIComponent(s)).join('/');
+        }
+
+        function parseBoolParam(value) {
+            if (value == null) return null;
+            const v = String(value).trim().toLowerCase();
+            if (!v) return null;
+            return v === '1' || v === 'true' || v === 'yes' || v === 'on';
         }
 
         function formatTime(seconds) {
@@ -713,13 +786,45 @@
             if (!Number.isFinite(bytes) || bytes < 0) return '';
             const units = ['B', 'KB', 'MB', 'GB', 'TB'];
             let v = bytes, i = 0;
-            while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+            while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
             return v.toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
         }
 
-        function isVideoFile(filenameOrPath) {
-            const ext = (filenameOrPath || '').split('.').pop().toLowerCase();
-            return ['mp4', 'mov', 'webm', 'm4v', 'mkv', 'avi', 'wmv', 'flv', 'ogv', '3gp'].includes(ext);
+        function normalizeExt(value) {
+            let ext = String(value || '').trim();
+            if (!ext) return '';
+            if (ext.charAt(0) === '.') ext = ext.slice(1);
+            return ext.toLowerCase();
+        }
+
+        function normalizeBasePath(value) {
+            if (value == null) return '';
+            let raw = String(value || '').trim();
+            if (!raw) return '';
+            raw = raw.replace(/^\/+/, '');
+            if (!raw || raw.indexOf('\\') !== -1) return '';
+            const parts = raw.split('/').filter(Boolean);
+            if (!parts.length || parts.some(p => p === '..')) return '';
+            return parts.join('/');
+        }
+
+        function getFileExt(file) {
+            if (!file) return '';
+            const metaExt = normalizeExt(file.extension);
+            if (metaExt) return metaExt;
+            let name = String(file.path || file.name || '');
+            name = name.split('?')[0].split('#')[0];
+            const idx = name.lastIndexOf('.');
+            if (idx < 0) return '';
+            return normalizeExt(name.slice(idx + 1));
+        }
+
+        function isVideoEntry(file) {
+            if (!file) return false;
+            const t = String(file.type || '').toLowerCase();
+            if (t === 'video') return true;
+            const ext = getFileExt(file);
+            return !!(ext && VIDEO_EXTS[ext]);
         }
 
         function loadProgressStorage() {
@@ -762,14 +867,94 @@
             saveProgressStorage();
         }
 
-        async function fetchFiles(shareHash) {
+        async function fetchFiles(shareHash, recursive, basePath) {
             try {
-                const resp = await fetch('/api/share/' + shareHash + '/files');
+                const flag = recursive ? '1' : '0';
+                const params = new URLSearchParams();
+                params.set('recursive', flag);
+                if (basePath) params.set('path', basePath);
+                const resp = await fetch('/api/share/' + shareHash + '/files?' + params.toString());
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 return await resp.json();
             } catch (err) {
                 console.error('Failed to fetch files:', err);
                 return null;
+            }
+        }
+
+        function extractFilesFromResponse(data) {
+            if (Array.isArray(data)) return data;
+            if (data && Array.isArray(data.files)) return data.files;
+            if (data && Array.isArray(data.items)) return data.items;
+            return null;
+        }
+
+        async function fetchShareMeta(shareHash) {
+            try {
+                const resp = await fetch('/api/public/share/' + shareHash);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                return data && typeof data === 'object' ? data : null;
+            } catch (err) {
+                console.warn('Failed to fetch share meta:', err);
+                return null;
+            }
+        }
+
+        async function ensureShareMeta() {
+            if (state.shareMeta) return state.shareMeta;
+            state.shareMeta = await fetchShareMeta(state.shareHash);
+            return state.shareMeta;
+        }
+
+        function updateShareInfo() {
+            if (!els.shareInfo) return;
+            const suffix = state.basePath ? (' / ' + state.basePath) : '';
+            els.shareInfo.textContent = state.shareHash + suffix;
+        }
+
+        async function maybeAutoBasePath() {
+            if (state.basePath || state.basePathAuto) return '';
+            const meta = await ensureShareMeta();
+            if (!meta || !Array.isArray(meta.items)) return '';
+            const candidate = normalizeBasePath(meta.name);
+            if (!candidate) return '';
+            const match = meta.items.some(function(item) {
+                return item && item.isDir && String(item.name) === candidate;
+            });
+            return match ? candidate : '';
+        }
+
+        async function updateEmptyStateHint() {
+            if (!els.emptyTitle || !els.emptyMessage) return;
+            if (state.basePath) {
+                els.emptyTitle.textContent = 'No Videos Found';
+                els.emptyMessage.textContent = 'No video files found in this folder.';
+                if (els.emptyEnableSubfolders) {
+                    els.emptyEnableSubfolders.style.display = state.recursive ? 'none' : '';
+                }
+                return;
+            }
+            if (state.files && state.files.length > 0) {
+                els.emptyTitle.textContent = 'No Videos Found';
+                els.emptyMessage.textContent = 'This share has files, but none look like videos. Use Gallery for images.';
+                if (els.emptyEnableSubfolders) els.emptyEnableSubfolders.style.display = 'none';
+                return;
+            }
+
+            const meta = await ensureShareMeta();
+
+            const numDirs = meta && Number.isFinite(Number(meta.numDirs)) ? Number(meta.numDirs) : 0;
+            const hasDirs = numDirs > 0;
+
+            if (hasDirs && !state.recursive) {
+                els.emptyTitle.textContent = 'No Videos Found';
+                els.emptyMessage.textContent = 'This folder only has subfolders. Enable Subfolders to include them.';
+                if (els.emptyEnableSubfolders) els.emptyEnableSubfolders.style.display = '';
+            } else {
+                els.emptyTitle.textContent = 'No Videos Found';
+                els.emptyMessage.textContent = 'This share does not contain any video files.';
+                if (els.emptyEnableSubfolders) els.emptyEnableSubfolders.style.display = 'none';
             }
         }
 
@@ -881,6 +1066,23 @@
             els.fileCount.textContent = state.videoFiles.length + ' video' + (state.videoFiles.length !== 1 ? 's' : '');
         }
 
+        function updateRecursiveToggle() {
+            if (!els.recursiveToggle) return;
+            const label = state.recursive ? 'Subfolders: On' : 'Subfolders: Off';
+            els.recursiveToggle.textContent = label;
+            els.recursiveToggle.setAttribute('aria-pressed', state.recursive ? 'true' : 'false');
+            els.recursiveToggle.classList.toggle('active', state.recursive);
+            if (els.galleryBtn && state.shareHash) {
+                var galleryUrl = '/gallery/' + state.shareHash;
+                var params = new URLSearchParams();
+                if (state.basePath) params.set('path', state.basePath);
+                if (state.recursive) params.set('recursive', '1');
+                var query = params.toString();
+                if (query) galleryUrl += '?' + query;
+                els.galleryBtn.href = galleryUrl;
+            }
+        }
+
         function updateActiveFileItem() {
             var items = els.fileList.querySelectorAll('.file-item');
             items.forEach(function(item, i) {
@@ -920,6 +1122,75 @@
                     }
                 }, { once: true });
             }
+        }
+
+        async function reloadFiles(options) {
+            var keepCurrent = options && options.keepCurrent;
+            var fileParam = options && options.fileParam;
+            var currentPath = null;
+
+            if (state.currentIndex >= 0 && state.currentIndex < state.videoFiles.length) {
+                var currentFile = state.videoFiles[state.currentIndex];
+                setVideoProgress(state.shareHash, getFilePath(currentFile), els.video.currentTime, els.video.duration);
+                if (keepCurrent) currentPath = getFilePath(currentFile);
+            }
+
+            showStatus('Loading files...', true);
+            var data = await fetchFiles(state.shareHash, state.recursive, state.basePath);
+            var files = extractFilesFromResponse(data);
+            if (!files) {
+                hideStatus();
+                showError('Failed to load files', 'Could not retrieve the file list from the server.');
+                return false;
+            }
+
+            state.files = files || [];
+            state.videoFiles = state.files.filter(function(f) { return isVideoEntry(f); });
+
+            if (state.videoFiles.length === 0) {
+                var autoPath = await maybeAutoBasePath();
+                if (autoPath) {
+                    state.basePath = autoPath;
+                    state.basePathAuto = true;
+                    updateShareInfo();
+                    updateRecursiveToggle();
+                    return reloadFiles({ keepCurrent: false, fileParam: fileParam });
+                }
+                hideStatus();
+                els.emptyState.style.display = 'flex';
+                els.video.style.display = 'none';
+                els.controls.style.display = 'none';
+                els.fileList.innerHTML = '';
+                els.fileCount.textContent = '0 videos';
+                els.videoTitle.textContent = 'Select a video';
+                els.downloadBtn.removeAttribute('href');
+                state.currentIndex = -1;
+                state.isPlaying = false;
+                try { els.video.pause(); } catch (e) { /* ignore */ }
+                els.video.removeAttribute('src');
+                els.video.load();
+                await updateEmptyStateHint();
+                return false;
+            }
+
+            els.emptyState.style.display = 'none';
+            els.video.style.display = '';
+            els.controls.style.display = '';
+            hideError();
+
+            var idx = -1;
+            if (fileParam) {
+                idx = state.videoFiles.findIndex(function(f) { return f.name === fileParam || f.path === fileParam; });
+            }
+            if (idx < 0 && currentPath) {
+                idx = state.videoFiles.findIndex(function(f) { return getFilePath(f) === currentPath; });
+            }
+            if (idx < 0) idx = 0;
+
+            state.currentIndex = -1;
+            renderFileList();
+            loadVideo(idx);
+            return true;
         }
 
         function playNext() {
@@ -1166,41 +1437,34 @@
                 showError('Invalid share link', 'The share hash is missing or invalid.');
                 return;
             }
+            state.basePath = normalizeBasePath(params.get('path') || params.get('p')) || '';
+            state.basePathAuto = false;
             loadProgressStorage();
-            els.galleryBtn.href = '/gallery/' + state.shareHash;
-            els.shareInfo.textContent = state.shareHash;
-            showStatus('Loading files...', true);
-            var data = await fetchFiles(state.shareHash);
+            updateShareInfo();
 
-            var files = null;
-            if (Array.isArray(data)) files = data;
-            else if (data && Array.isArray(data.files)) files = data.files;
-            else if (data && Array.isArray(data.items)) files = data.items;
-
-            if (!files) {
-                showError('Failed to load files', 'Could not retrieve the file list from the server.');
-                return;
+            var recursiveParam = parseBoolParam(params.get('recursive'));
+            state.recursive = recursiveParam === null ? false : recursiveParam;
+            updateRecursiveToggle();
+            if (els.recursiveToggle) {
+                els.recursiveToggle.onclick = function() {
+                    state.recursive = !state.recursive;
+                    updateRecursiveToggle();
+                    reloadFiles({ keepCurrent: true });
+                };
+            }
+            if (els.emptyEnableSubfolders) {
+                els.emptyEnableSubfolders.onclick = function() {
+                    state.recursive = true;
+                    updateRecursiveToggle();
+                    reloadFiles({ keepCurrent: false });
+                };
             }
 
-            state.files = files || [];
-            state.videoFiles = state.files.filter(function(f) { return isVideoFile(f.path || f.name); });
-            if (state.videoFiles.length === 0) {
-                hideStatus();
-                els.emptyState.style.display = 'flex';
-                els.video.style.display = 'none';
-                els.controls.style.display = 'none';
-                return;
-            }
-            renderFileList();
             setupVideoEvents();
             setupControlEvents();
             setupKeyboardShortcuts();
-            var fileParam = params.get('file');
-            if (fileParam) {
-                var idx = state.videoFiles.findIndex(function(f) { return f.name === fileParam || f.path === fileParam; });
-                if (idx >= 0) { loadVideo(idx); return; }
-            }
-            loadVideo(0);
+
+            await reloadFiles({ fileParam: params.get('file') });
         }
 
         init();

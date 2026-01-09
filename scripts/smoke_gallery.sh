@@ -3,12 +3,12 @@ set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
   echo "usage: $(basename "$0") <share-hash> [base-url]" >&2
-  echo "example: $(basename "$0") 4OzFiCVh https://droppr.coolmri.com" >&2
+  echo "example: $(basename "$0") 4OzFiCVh https://droppr.lucheestiy.com" >&2
   exit 2
 fi
 
 share_hash="$1"
-base_url="${2:-https://droppr.coolmri.com}"
+base_url="${2:-https://droppr.lucheestiy.com}"
 base_url="${base_url%/}"
 
 gallery_url="${base_url}/gallery/${share_hash}"

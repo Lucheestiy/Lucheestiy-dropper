@@ -7,6 +7,9 @@ Provides:
   - GET /api/share/<hash>/files: list files in a share (public, cached)
   - GET /api/share/<hash>/file/<path>: counted downloads (redirects to FileBrowser)
   - GET /api/share/<hash>/download: counted "download all" (streams FileBrowser ZIP/file)
+- Admin user management (requires FileBrowser auth token):
+  - GET /api/droppr/users: account scope config
+  - POST /api/droppr/users: create scoped upload user
 - Admin analytics (requires FileBrowser auth token):
   - GET /api/analytics/config
   - GET /api/analytics/shares
@@ -49,10 +52,32 @@ MAX_SHARE_HASH_LENGTH = 64  # Prevent DOS via extremely long hashes
 DEFAULT_CACHE_TTL_SECONDS = int(os.environ.get("DROPPR_SHARE_CACHE_TTL_SECONDS", "3600"))
 MAX_CACHE_SIZE = 1000  # Max number of shares to cache
 _share_cache_lock = threading.Lock()
-_share_files_cache: dict[str, tuple[float, str, list[dict]]] = {}
+_share_files_cache: dict[tuple[str, str], tuple[float, str, bool, list[dict]]] = {}
 
 IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "avif"}
-VIDEO_EXTS = {"mp4", "mov", "m4v", "webm", "mkv", "avi"}
+VIDEO_EXTS = {
+    "3g2",
+    "3gp",
+    "asf",
+    "avi",
+    "flv",
+    "m2ts",
+    "m2v",
+    "m4v",
+    "mkv",
+    "mov",
+    "mp4",
+    "mpe",
+    "mpeg",
+    "mpg",
+    "mts",
+    "mxf",
+    "ogv",
+    "ts",
+    "vob",
+    "webm",
+    "wmv",
+}
 
 
 def is_valid_share_hash(share_hash: str) -> bool:
@@ -84,6 +109,16 @@ def _safe_rel_path(value: str) -> str | None:
     if any(p == ".." for p in parts):
         return None
     return "/".join(parts)
+
+
+def _normalize_share_subpath(value: str | None) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    raw = raw.lstrip("/")
+    if not raw:
+        return None
+    return _safe_rel_path(raw)
 
 
 def _safe_root_path(value: str) -> str | None:
@@ -129,6 +164,75 @@ def _encode_share_path(value: str) -> str | None:
         return None
 
     return "/" + "/".join(quote(p, safe="") for p in parts)
+
+
+USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
+USER_SCOPE_ROOT = _safe_root_path(os.environ.get("DROPPR_USER_ROOT", "/users")) or "/users"
+USER_DATA_DIR = os.environ.get("DROPPR_USER_DATA_DIR", "/srv")
+try:
+    USER_PASSWORD_MIN_LEN = int(os.environ.get("DROPPR_USER_PASSWORD_MIN_LEN", "8"))
+except (TypeError, ValueError):
+    USER_PASSWORD_MIN_LEN = 8
+USER_PASSWORD_MIN_LEN = max(6, USER_PASSWORD_MIN_LEN)
+USER_DEFAULT_PERMS = {
+    "admin": False,
+    "create": True,
+    "delete": True,
+    "download": True,
+    "modify": True,
+    "rename": True,
+    "share": True,
+    "execute": True,
+}
+
+
+def _normalize_username(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = str(value).strip()
+    if not value:
+        return None
+    if not USERNAME_RE.fullmatch(value):
+        return None
+    return value
+
+
+def _normalize_password(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = str(value)
+    if len(value) < USER_PASSWORD_MIN_LEN:
+        return None
+    return value
+
+
+def _build_user_scope(username: str) -> str:
+    root = USER_SCOPE_ROOT or "/users"
+    if root == "/":
+        return "/" + username
+    return root.rstrip("/") + "/" + username
+
+
+def _safe_join(base: str, *parts: str) -> str | None:
+    base_abs = os.path.abspath(base)
+    target = os.path.abspath(os.path.join(base_abs, *parts))
+    if target == base_abs or target.startswith(base_abs + os.sep):
+        return target
+    return None
+
+
+def _ensure_user_directory(scope_path: str) -> str:
+    base_dir = USER_DATA_DIR or "/srv"
+    base_abs = os.path.abspath(base_dir)
+    os.makedirs(base_abs, exist_ok=True)
+    rel = scope_path.lstrip("/")
+    target = _safe_join(base_abs, rel)
+    if not target:
+        raise RuntimeError("Invalid user directory")
+    os.makedirs(target, exist_ok=True)
+    if not os.path.isdir(target):
+        raise RuntimeError("User directory is not a directory")
+    return target
 
 
 def _normalize_ip(value: str | None) -> str | None:
@@ -1052,6 +1156,32 @@ def _create_filebrowser_share(*, token: str, path_encoded: str, hours: int) -> d
     return data if isinstance(data, dict) else {}
 
 
+def _create_filebrowser_user(*, token: str, username: str, password: str, scope: str) -> dict:
+    payload = {"what": "user", "data": {"username": username, "password": password, "scope": scope, "perm": USER_DEFAULT_PERMS}}
+    resp = requests.post(
+        f"{FILEBROWSER_BASE_URL}/api/users",
+        headers={"X-Auth": token, "Content-Type": "application/json"},
+        json=payload,
+        timeout=10,
+    )
+    if resp.status_code in {401, 403}:
+        raise PermissionError("Unauthorized")
+    if resp.status_code == 409:
+        raise FileExistsError("User already exists")
+    if resp.status_code >= 400:
+        try:
+            data = resp.json()
+            msg = data.get("error") or data.get("message")
+        except Exception:
+            msg = None
+        raise RuntimeError(msg or f"User API failed ({resp.status_code})")
+    try:
+        data = resp.json()
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _fetch_filebrowser_shares(token: str) -> list[dict]:
     # TEMPORARY FIX: Disable fetching shares to prevent FileBrowser panic (slice bounds out of range)
     # The endpoint GET /api/shares seems to crash the current FileBrowser instance.
@@ -1139,7 +1269,9 @@ def _infer_gallery_type(item: dict, extension: str) -> str:
     return "file"
 
 
-def _build_folder_share_file_list(*, request_hash: str, source_hash: str, root: dict) -> list[dict]:
+def _build_folder_share_file_list(
+    *, request_hash: str, source_hash: str, root: dict, recursive: bool
+) -> list[dict]:
     files: list[dict] = []
     dirs_to_scan: list[str] = []
     visited_dirs: set[str] = set()
@@ -1153,33 +1285,34 @@ def _build_folder_share_file_list(*, request_hash: str, source_hash: str, root: 
             continue
         if item.get("isDir"):
             path = item.get("path")
-            if isinstance(path, str) and path.startswith("/"):
+            if recursive and isinstance(path, str) and path.startswith("/"):
                 dirs_to_scan.append(path)
             continue
         files.append(item)
 
-    while dirs_to_scan:
-        dir_path = dirs_to_scan.pop()
-        if dir_path in visited_dirs:
-            continue
-        visited_dirs.add(dir_path)
-
-        data = _fetch_public_share_json(source_hash, subpath=dir_path)
-        if not data:
-            continue
-        items = data.get("items")
-        if not isinstance(items, list):
-            continue
-
-        for item in items:
-            if not isinstance(item, dict):
+    if recursive:
+        while dirs_to_scan:
+            dir_path = dirs_to_scan.pop()
+            if dir_path in visited_dirs:
                 continue
-            if item.get("isDir"):
-                path = item.get("path")
-                if isinstance(path, str) and path.startswith("/"):
-                    dirs_to_scan.append(path)
+            visited_dirs.add(dir_path)
+
+            data = _fetch_public_share_json(source_hash, subpath=dir_path)
+            if not data:
                 continue
-            files.append(item)
+            items = data.get("items")
+            if not isinstance(items, list):
+                continue
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("isDir"):
+                    path = item.get("path")
+                    if isinstance(path, str) and path.startswith("/"):
+                        dirs_to_scan.append(path)
+                    continue
+                files.append(item)
 
     # Normalize, remove directories, and enrich with URLs
     result = []
@@ -1241,21 +1374,35 @@ def _build_file_share_file_list(*, request_hash: str, source_hash: str, meta: di
 
 
 def _get_share_files(
-    request_hash: str, *, source_hash: str, force_refresh: bool, max_age_seconds: int
+    request_hash: str,
+    *,
+    source_hash: str,
+    force_refresh: bool,
+    max_age_seconds: int,
+    recursive: bool,
+    root_subpath: str | None,
 ) -> list[dict] | None:
     now = time.time()
+    cache_key = (request_hash, root_subpath or "")
     if not force_refresh:
         with _share_cache_lock:
-            cached = _share_files_cache.get(request_hash)
-            if cached and (now - cached[0]) < max_age_seconds and cached[1] == source_hash:
-                return cached[2]
+            cached = _share_files_cache.get(cache_key)
+            if (
+                cached
+                and (now - cached[0]) < max_age_seconds
+                and cached[1] == source_hash
+                and cached[2] == recursive
+            ):
+                return cached[3]
 
-    data = _fetch_public_share_json(source_hash)
+    data = _fetch_public_share_json(source_hash, subpath=root_subpath) if root_subpath else _fetch_public_share_json(source_hash)
     if not data:
         return None
 
     if isinstance(data.get("items"), list):
-        files = _build_folder_share_file_list(request_hash=request_hash, source_hash=source_hash, root=data)
+        files = _build_folder_share_file_list(
+            request_hash=request_hash, source_hash=source_hash, root=data, recursive=recursive
+        )
     else:
         files = _build_file_share_file_list(request_hash=request_hash, source_hash=source_hash, meta=data)
 
@@ -1264,9 +1411,16 @@ def _get_share_files(
             # Simple eviction strategy: clear the whole cache if it gets too big.
             # A more sophisticated LRU is possible but likely overkill for this scale.
             _share_files_cache.clear()
-        _share_files_cache[request_hash] = (now, source_hash, files)
+        _share_files_cache[cache_key] = (now, source_hash, recursive, files)
 
     return files
+
+
+def _evict_share_cache(share_hash: str) -> None:
+    with _share_cache_lock:
+        keys = [key for key in _share_files_cache if key[0] == share_hash]
+        for key in keys:
+            _share_files_cache.pop(key, None)
 
 
 @app.route("/api/share/<share_hash>/files")
@@ -1275,6 +1429,13 @@ def list_share_files(share_hash: str):
         return jsonify({"error": "Invalid share hash"}), 400
 
     source_hash = _resolve_share_hash(share_hash)
+
+    subpath_raw = request.args.get("path") or request.args.get("p")
+    subpath = None
+    if subpath_raw is not None:
+        subpath = _normalize_share_subpath(subpath_raw)
+        if subpath is None:
+            return jsonify({"error": "Invalid path"}), 400
 
     force_refresh = parse_bool(request.args.get("refresh") or request.args.get("force"))
     max_age_param = request.args.get("max_age") or request.args.get("maxAge")
@@ -1285,11 +1446,16 @@ def list_share_files(share_hash: str):
         except (TypeError, ValueError):
             max_age_seconds = DEFAULT_CACHE_TTL_SECONDS
 
+    recursive_param = request.args.get("recursive")
+    recursive = True if recursive_param is None else parse_bool(recursive_param)
+
     files = _get_share_files(
         share_hash,
         source_hash=source_hash,
         force_refresh=force_refresh,
         max_age_seconds=max_age_seconds,
+        recursive=recursive,
+        root_subpath=subpath,
     )
     if files is None:
         return jsonify({"error": "Share not found"}), 404
@@ -2087,6 +2253,69 @@ def download_all(share_hash: str):
         return "Failed to download share", 500
 
 
+@app.route("/api/droppr/users", methods=["GET", "POST"])
+def droppr_users():
+    token = _get_auth_token()
+    if not token:
+        return jsonify({"error": "Missing auth token"}), 401
+
+    try:
+        status = _validate_filebrowser_admin(token)
+    except Exception as e:
+        return jsonify({"error": f"Failed to validate auth: {e}"}), 502
+
+    if status is not None:
+        return jsonify({"error": "Unauthorized"}), status
+
+    if request.method == "GET":
+        resp = jsonify(
+            {
+                "root": USER_SCOPE_ROOT,
+                "username_pattern": USERNAME_RE.pattern,
+                "password_min_length": USER_PASSWORD_MIN_LEN,
+            }
+        )
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    payload = request.get_json(silent=True) or {}
+    username = _normalize_username(payload.get("username") or payload.get("user") or payload.get("name"))
+    if not username:
+        return jsonify({"error": "Invalid username"}), 400
+
+    password = _normalize_password(payload.get("password"))
+    if not password:
+        return jsonify({"error": f"Password must be at least {USER_PASSWORD_MIN_LEN} characters"}), 400
+
+    scope = _build_user_scope(username)
+    try:
+        _ensure_user_directory(scope)
+    except Exception as e:
+        app.logger.error("Failed to create user directory for %s: %s", username, e)
+        return jsonify({"error": "Failed to create user directory"}), 500
+
+    try:
+        user = _create_filebrowser_user(token=token, username=username, password=password, scope=scope)
+    except FileExistsError:
+        return jsonify({"error": "User already exists"}), 409
+    except PermissionError:
+        return jsonify({"error": "Unauthorized"}), 401
+    except Exception as e:
+        app.logger.error("Failed to create user %s: %s", username, e)
+        return jsonify({"error": "Failed to create user"}), 502
+
+    resp = jsonify(
+        {
+            "id": user.get("id") if isinstance(user, dict) else None,
+            "username": username,
+            "scope": scope,
+            "root": USER_SCOPE_ROOT,
+        }
+    )
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/api/droppr/shares/<share_hash>/expire", methods=["POST"])
 def droppr_update_share_expire(share_hash: str):
     if not is_valid_share_hash(share_hash):
@@ -2143,8 +2372,7 @@ def droppr_update_share_expire(share_hash: str):
         target_expire = int(new_expire or 0) if new_expire is not None else None
         _upsert_share_alias(from_hash=share_hash, to_hash=new_hash, path=path, target_expire=target_expire)
 
-        with _share_cache_lock:
-            _share_files_cache.pop(share_hash, None)
+        _evict_share_cache(share_hash)
 
         result = {
             "hash": share_hash,

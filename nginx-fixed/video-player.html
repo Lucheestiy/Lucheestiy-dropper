@@ -1,4 +1,4 @@
-<!-- VERSION: 1.4.11 - Auto shows active source; iOS Auto=HD -->
+<!-- VERSION: 1.5.0 - Simplified gallery player UI -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,11 +8,24 @@
     <style>
         * { box-sizing: border-box; }
         html, body { height: 100%; }
+        :root {
+            --bg: #0b0b0d;
+            --bg-glow: rgba(245, 158, 11, 0.16);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --text: #f9f5ef;
+            --text-muted: rgba(249, 245, 239, 0.7);
+        }
+
         body {
             margin: 0;
-            background: #000;
-            color: #fff;
-            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            background: radial-gradient(900px 500px at 18% -10%, var(--bg-glow), transparent 60%), var(--bg);
+            color: var(--text);
+            font-family: "Space Grotesk", "Fira Sans", "Helvetica Neue", sans-serif;
+        }
+
+        @keyframes topbarReveal {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         .topbar {
@@ -20,13 +33,16 @@
             top: 0;
             left: 0;
             right: 0;
-            padding: max(0.75rem, env(safe-area-inset-top, 0px)) 0.75rem 0.75rem;
+            padding: max(0.85rem, env(safe-area-inset-top, 0px)) 0.9rem 0.75rem;
             display: flex;
             gap: 0.75rem;
             align-items: center;
             justify-content: space-between;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.85), rgba(0,0,0,0));
+            background: linear-gradient(to bottom, rgba(8, 9, 12, 0.88), rgba(8, 9, 12, 0.35) 65%, transparent);
+            border-bottom: 1px solid var(--panel-border);
+            backdrop-filter: blur(10px);
             z-index: 10;
+            animation: topbarReveal 0.35s ease-out;
         }
 
         .left {
@@ -45,32 +61,36 @@
 
         .title .name {
             font-weight: 600;
+            letter-spacing: 0.01em;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 60vw;
-        }
-
-        .title .sub {
-            font-size: 0.85rem;
-            opacity: 0.75;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 60vw;
+            max-width: 62vw;
         }
 
         .btn {
             appearance: none;
-            border: 1px solid rgba(255,255,255,0.18);
-            background: rgba(255,255,255,0.08);
-            color: #fff;
-            padding: 0.55rem 0.8rem;
-            border-radius: 12px;
+            border: 1px solid var(--panel-border);
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text);
+            padding: 0.55rem 0.85rem;
+            border-radius: 999px;
             text-decoration: none;
             cursor: pointer;
             font-weight: 600;
+            letter-spacing: 0.01em;
             white-space: nowrap;
+            transition: background 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
+        }
+
+        .btn.secondary {
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-muted);
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.16);
+            border-color: rgba(255, 255, 255, 0.18);
         }
 
         .btn:active { transform: translateY(1px); }
@@ -83,70 +103,22 @@
 
         @media (max-width: 600px) {
             .actions .btn.secondary { display: none; }
-            .title .name, .title .sub { max-width: 50vw; }
+            .title .name { max-width: 55vw; }
         }
 
-	        .player {
-	            height: 100%;
-	            display: flex;
-	            align-items: center;
-	            justify-content: center;
-	            padding: 0;
-	        }
+        .player {
+            height: 100dvh;
+            width: 100vw;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
 
-	        .statusbar {
-	            position: fixed;
-	            left: 50%;
-	            transform: translateX(-50%);
-	            top: 56px;
-	            padding: 0.4rem 0.75rem;
-	            background: rgba(0,0,0,0.75);
-	            border-radius: 8px;
-	            z-index: 9;
-	            pointer-events: none;
-	            max-width: 320px;
-	            width: auto;
-	        }
-
-	        .statusbar .row {
-	            display: flex;
-	            gap: 0.5rem;
-	            align-items: center;
-	            justify-content: center;
-	            font-size: 0.7rem;
-	            opacity: 0.9;
-	        }
-
-	        .statusbar .lefttext {
-	            min-width: 0;
-	            overflow: hidden;
-	            white-space: nowrap;
-	            text-overflow: ellipsis;
-	        }
-
-	        .statusbar .righttext {
-	            white-space: nowrap;
-	            opacity: 0.85;
-	        }
-
-	        .statusbar .bar {
-	            margin-top: 0.3rem;
-	            height: 3px;
-	            border-radius: 999px;
-	            background: rgba(74,158,255,0.25);
-	            overflow: hidden;
-	        }
-
-	        .statusbar .fill {
-	            height: 100%;
-	            width: 0%;
-	            background: #4a9eff;
-	        }
-
-	        video {
-	            width: 100%;
-	            height: 100%;
-	            max-height: 100vh;
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
             background: #000;
         }
 
@@ -158,42 +130,31 @@
             justify-content: center;
             padding: 2rem;
             text-align: center;
-            background: rgba(0,0,0,0.9);
+            background: rgba(8, 9, 12, 0.92);
             z-index: 20;
         }
 
         .error.show { display: flex; }
-        .error h2 { margin: 0 0 0.5rem; }
-        .error p { margin: 0.25rem 0; opacity: 0.85; }
+        .error h2 { margin: 0 0 0.5rem; font-size: 1.3rem; }
+        .error p { margin: 0.25rem 0; color: var(--text-muted); }
     </style>
 </head>
 <body>
     <div class="topbar">
         <div class="left">
-            <a id="backLink" class="btn" href="/gallery/" onclick="this.href='/gallery/'+(new URLSearchParams(location.search).get('share')||'')">← Back</a>
+            <a id="backLink" class="btn" href="#">← Back</a>
             <div class="title">
                 <div id="fileName" class="name">Video</div>
-                <div id="fileSub" class="sub"></div>
             </div>
         </div>
         <div class="actions">
             <a id="downloadLink" class="btn secondary" href="#" download>⬇ Download</a>
             <a id="openLink" class="btn secondary" href="#" target="_blank" rel="noopener">↗ Open</a>
-            <button id="qualityBtn" class="btn" type="button" title="Quality mode">Auto</button>
-            <button id="reloadBtn" class="btn" type="button">⟳ Reload</button>
         </div>
     </div>
 
 	    <div class="player">
 	        <video id="video" controls playsinline preload="metadata"></video>
-	    </div>
-
-	    <div id="statusBar" class="statusbar" aria-live="polite">
-	        <div class="row">
-	            <div id="bufferText" class="lefttext">Loading…</div>
-	            <div id="timeText" class="righttext"></div>
-	        </div>
-	        <div class="bar"><div id="bufferFill" class="fill"></div></div>
 	    </div>
 
 	    <div id="error" class="error" role="dialog" aria-modal="true" aria-label="Error">
@@ -247,7 +208,7 @@
         document.title = fileName + ' - Droppr';
         document.getElementById('fileName').textContent = fileName;
         const fileSubEl = document.getElementById('fileSub');
-        fileSubEl.textContent = share;
+        if (fileSubEl) fileSubEl.textContent = share;
 
         const sourcesApiUrl = `/api/share/${share}/video-sources/${encodePath(safeFile)}`;
         const originalInlineUrlDefault = `/api/public/dl/${share}/${encodePath(safeFile)}?inline=true`;
@@ -263,6 +224,7 @@
         const openLink = document.getElementById('openLink');
         const qualityBtn = document.getElementById('qualityBtn');
         const reloadBtn = document.getElementById('reloadBtn');
+        const hasStatusUI = !!(bufferText && timeText && bufferFill);
 
         backLink.href = backUrl;
         downloadLink.href = downloadUrl;
@@ -329,19 +291,6 @@
             const sec = s % 60;
             if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
             return `${m}:${String(sec).padStart(2, '0')}`;
-        }
-
-        function formatBytes(bytes) {
-            if (!Number.isFinite(bytes) || bytes < 0) return '';
-            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-            let v = bytes;
-            let i = 0;
-            while (v >= 1024 && i < units.length - 1) {
-                v /= 1024;
-                i++;
-            }
-            const digits = v >= 100 || i === 0 ? 0 : (v >= 10 ? 1 : 2);
-            return `${v.toFixed(digits)} ${units[i]}`;
         }
 
         function clearHdStableTimer() {
@@ -411,17 +360,12 @@
         function updateQualityUI() {
             const modeLabel = QUALITY_LABEL[qualityMode] || 'Auto';
             const srcLabel = activeSource ? sourceLabel(activeSource) : '';
-            qualityBtn.textContent = (qualityMode === 'auto' && srcLabel) ? `${modeLabel} (${srcLabel})` : modeLabel;
-
-            const sizeBytes =
-                (activeSource && sources[activeSource] && sources[activeSource].size) ||
-                sources.original.size ||
-                null;
-
-            let sub = `${share} • ${modeLabel}`;
-            if (srcLabel) sub += `: ${srcLabel}`;
-            if (sizeBytes) sub += ` • ${formatBytes(sizeBytes)}`;
-            fileSubEl.textContent = sub;
+            if (qualityBtn) {
+                qualityBtn.textContent = (qualityMode === 'auto' && srcLabel) ? `${modeLabel} (${srcLabel})` : modeLabel;
+            }
+            if (fileSubEl) {
+                fileSubEl.textContent = share;
+            }
 
             setOpenLinkForSource(activeSource || 'original');
         }
@@ -474,6 +418,7 @@
         }
 
         function updateStatusUI() {
+            if (!hasStatusUI) return;
             const state = getStateLabel();
             const info = getBufferedInfo();
 
@@ -516,6 +461,7 @@
         }
 
         function startStatusTimer() {
+            if (!hasStatusUI) return;
             if (statusTimer) return;
             statusTimer = setInterval(updateStatusUI, 500);
         }
@@ -893,17 +839,21 @@
             setSource(pickPlayableSource(desired), { time: t, shouldPlay });
         }
 
-        qualityBtn.onclick = () => cycleQualityMode();
+        if (qualityBtn) {
+            qualityBtn.onclick = () => cycleQualityMode();
+        }
 
-        reloadBtn.onclick = () => {
-            const t = video.currentTime;
-            const shouldPlay = !video.paused;
-            setSource(activeSource || pickPlayableSource(desiredForCurrentMode()), {
-                time: t,
-                shouldPlay,
-                cacheBust: true,
-            });
-        };
+        if (reloadBtn) {
+            reloadBtn.onclick = () => {
+                const t = video.currentTime;
+                const shouldPlay = !video.paused;
+                setSource(activeSource || pickPlayableSource(desiredForCurrentMode()), {
+                    time: t,
+                    shouldPlay,
+                    cacheBust: true,
+                });
+            };
+        }
 
         video.addEventListener('play', () => {
             if (qualityMode === 'auto' && !sources.fast.ready && !fastPrepareInFlight) ensurePrepared(['fast']);
@@ -931,7 +881,7 @@
         video.addEventListener('error', () => {
             clearHdStableTimer();
             if (qualityMode === 'auto' && activeSource === 'hd') return;
-            showError('Could not load video', 'Try Reload. If it keeps failing, go back to the gallery.');
+            showError('Could not load video', 'Try refreshing the page. If it keeps failing, go back to the gallery.');
         });
 
         window.addEventListener('beforeunload', () => stopStatusTimer());

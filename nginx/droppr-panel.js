@@ -2,7 +2,7 @@
   if (window.__dropprPanelBooted) return;
   window.__dropprPanelBooted = true;
 
-  var DROPPR_PANEL_VERSION = "26";
+  var DROPPR_PANEL_VERSION = "27";
   var ANALYTICS_BTN_ID = "droppr-analytics-btn";
   var ANALYTICS_STYLE_ID = "droppr-analytics-style";
   var SHARE_EXPIRE_STYLE_ID = "droppr-share-expire-style";
@@ -30,6 +30,9 @@
   var STREAM_SHARE_STYLE_ID = "droppr-stream-share-style";
   var FILES_STREAM_SHARE_BTN_CLASS = "droppr-files-stream-share-btn";
   var FILES_STREAM_SHARE_STYLE_ID = "droppr-files-stream-share-style";
+  var ACCOUNTS_BTN_ID = "droppr-accounts-btn";
+  var ACCOUNTS_STYLE_ID = "droppr-accounts-style";
+  var ACCOUNTS_MODAL_ID = "droppr-accounts-modal";
 
   var uploadBatch = null;
   var tusUploads = {};
@@ -46,6 +49,11 @@
   var filesVideoHydrateTimer = null;
   var filesVideoLastPathname = null;
   var videoMetaDebugStats = { ok: 0, notFound: 0, unauth: 0, other: 0 };
+  var accountsAdminState = null;
+  var accountsAdminCheck = null;
+  var accountsRootPath = null;
+  var accountsUsernameRe = /^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$/;
+  var accountsPasswordMinLen = 8;
 
   function nowMs() {
     return new Date().getTime();
@@ -183,6 +191,418 @@
       '<span class="label">Analytics</span>';
 
     document.body.appendChild(a);
+  }
+
+  function ensureAccountsStyles() {
+    if (document.getElementById(ACCOUNTS_STYLE_ID)) return;
+    var style = document.createElement("style");
+    style.id = ACCOUNTS_STYLE_ID;
+    style.textContent =
+      "#" + ACCOUNTS_BTN_ID + " {\n" +
+      "  position: fixed;\n" +
+      "  right: 18px;\n" +
+      "  bottom: 66px;\n" +
+      "  z-index: 2147483000;\n" +
+      "  display: inline-flex;\n" +
+      "  align-items: center;\n" +
+      "  gap: 8px;\n" +
+      "  padding: 10px 12px;\n" +
+      "  border-radius: 999px;\n" +
+      "  background: rgba(16, 185, 129, 0.95);\n" +
+      "  color: #fff !important;\n" +
+      "  text-decoration: none !important;\n" +
+      "  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;\n" +
+      "  font-weight: 700;\n" +
+      "  letter-spacing: -0.01em;\n" +
+      "  box-shadow: 0 18px 40px -18px rgba(0,0,0,0.65);\n" +
+      "  border: 1px solid rgba(255,255,255,0.18);\n" +
+      "  user-select: none;\n" +
+      "  cursor: pointer;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_BTN_ID + ":hover {\n" +
+      "  background: rgba(5, 150, 105, 0.98);\n" +
+      "  transform: translateY(-1px);\n" +
+      "}\n" +
+      "#" + ACCOUNTS_BTN_ID + " .icon {\n" +
+      "  width: 18px;\n" +
+      "  height: 18px;\n" +
+      "  display: inline-block;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_BTN_ID + " .label {\n" +
+      "  font-size: 14px;\n" +
+      "  line-height: 1;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " {\n" +
+      "  position: fixed;\n" +
+      "  inset: 0;\n" +
+      "  z-index: 2147483002;\n" +
+      "  display: flex;\n" +
+      "  align-items: center;\n" +
+      "  justify-content: center;\n" +
+      "  background: rgba(2, 6, 23, 0.6);\n" +
+      "  padding: 24px;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .panel {\n" +
+      "  width: 480px;\n" +
+      "  max-width: calc(100vw - 48px);\n" +
+      "  border-radius: 16px;\n" +
+      "  background: var(--droppr-overlay-bg, rgba(17, 24, 39, 0.98));\n" +
+      "  color: var(--text-primary, #e5e7eb);\n" +
+      "  border: 1px solid var(--droppr-overlay-border, rgba(255,255,255,0.12));\n" +
+      "  box-shadow: 0 26px 60px -30px rgba(0,0,0,0.85);\n" +
+      "  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;\n" +
+      "  overflow: hidden;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .hdr {\n" +
+      "  display: flex;\n" +
+      "  align-items: flex-start;\n" +
+      "  justify-content: space-between;\n" +
+      "  gap: 12px;\n" +
+      "  padding: 16px 18px 10px 18px;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .title {\n" +
+      "  font-size: 15px;\n" +
+      "  font-weight: 800;\n" +
+      "  line-height: 1.2;\n" +
+      "  color: var(--text-primary, #fff);\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .subtitle {\n" +
+      "  font-size: 12px;\n" +
+      "  margin-top: 6px;\n" +
+      "  color: var(--droppr-overlay-muted, rgba(229,231,235,0.8));\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .close {\n" +
+      "  appearance: none;\n" +
+      "  border: 0;\n" +
+      "  background: transparent;\n" +
+      "  color: var(--droppr-overlay-muted, rgba(229,231,235,0.85));\n" +
+      "  cursor: pointer;\n" +
+      "  font-size: 20px;\n" +
+      "  line-height: 1;\n" +
+      "  padding: 6px 8px;\n" +
+      "  border-radius: 10px;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .close:hover {\n" +
+      "  background: var(--hover-bg, rgba(255,255,255,0.08));\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .body {\n" +
+      "  padding: 0 18px 18px 18px;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .label {\n" +
+      "  display: block;\n" +
+      "  font-size: 12px;\n" +
+      "  font-weight: 700;\n" +
+      "  color: var(--text-primary, #e5e7eb);\n" +
+      "  margin-top: 12px;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " input {\n" +
+      "  width: 100%;\n" +
+      "  border-radius: 10px;\n" +
+      "  border: 1px solid var(--border-color, rgba(255,255,255,0.12));\n" +
+      "  background: var(--input-bg, rgba(0,0,0,0.22));\n" +
+      "  padding: 10px 10px;\n" +
+      "  color: var(--text-primary, #fff);\n" +
+      "  font-size: 13px;\n" +
+      "  outline: none;\n" +
+      "  margin-top: 6px;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " input:focus {\n" +
+      "  border-color: rgba(99,102,241,0.7);\n" +
+      "  box-shadow: 0 0 0 3px rgba(99,102,241,0.18);\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .note {\n" +
+      "  margin-top: 10px;\n" +
+      "  font-size: 12px;\n" +
+      "  color: var(--droppr-overlay-muted, rgba(229,231,235,0.8));\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .note span {\n" +
+      "  color: var(--text-primary, #fff);\n" +
+      "  font-weight: 700;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .status {\n" +
+      "  min-height: 18px;\n" +
+      "  margin-top: 10px;\n" +
+      "  font-size: 12px;\n" +
+      "  color: var(--droppr-overlay-muted, rgba(229,231,235,0.8));\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .status.error {\n" +
+      "  color: #fca5a5;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .status.success {\n" +
+      "  color: #86efac;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .actions {\n" +
+      "  display: flex;\n" +
+      "  justify-content: flex-end;\n" +
+      "  gap: 10px;\n" +
+      "  margin-top: 16px;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .btn {\n" +
+      "  flex: 0 0 auto;\n" +
+      "  cursor: pointer;\n" +
+      "  border: 1px solid var(--border-color, rgba(255,255,255,0.12));\n" +
+      "  background: var(--accent-color, rgba(99, 102, 241, 0.95));\n" +
+      "  color: #fff;\n" +
+      "  font-weight: 800;\n" +
+      "  font-size: 13px;\n" +
+      "  padding: 10px 14px;\n" +
+      "  border-radius: 10px;\n" +
+      "}\n" +
+      "#" + ACCOUNTS_MODAL_ID + " .btn.secondary {\n" +
+      "  background: var(--hover-bg, rgba(255,255,255,0.08));\n" +
+      "  color: var(--text-primary, #fff);\n" +
+      "}\n";
+    document.head.appendChild(style);
+  }
+
+  function checkAccountsAdmin() {
+    if (accountsAdminCheck) return accountsAdminCheck;
+    var token = getAuthToken();
+    if (!token) return Promise.resolve(false);
+
+    accountsAdminCheck = fetch("/api/droppr/users", {
+      headers: { "X-Auth": token },
+    })
+      .then(function (res) {
+        return res.text().then(function (text) {
+          var data = null;
+          if (text) {
+            try { data = JSON.parse(text); } catch (e) { data = null; }
+          }
+
+          if (!res.ok) {
+            if (res.status === 401 || res.status === 403) {
+              accountsAdminState = false;
+            } else {
+              accountsAdminState = null;
+            }
+            return false;
+          }
+
+          if (data && data.root) accountsRootPath = String(data.root || "");
+          if (data && data.username_pattern) {
+            try { accountsUsernameRe = new RegExp(data.username_pattern); } catch (e2) {}
+          }
+          if (data && data.password_min_length != null) {
+            var n = parseInt(String(data.password_min_length), 10);
+            if (!isNaN(n) && n > 0) accountsPasswordMinLen = n;
+          }
+
+          accountsAdminState = true;
+          return true;
+        });
+      })
+      .catch(function () {
+        accountsAdminState = null;
+        return false;
+      })
+      .then(function (ok) {
+        accountsAdminCheck = null;
+        return ok;
+      });
+
+    return accountsAdminCheck;
+  }
+
+  function formatAccountScope(username) {
+    var root = String(accountsRootPath || "/users");
+    root = root.replace(/\/+$/, "");
+    if (!root) root = "/";
+    if (!username) {
+      if (root === "/") return "/<username>";
+      return root + "/<username>";
+    }
+    if (root === "/") return "/" + username;
+    return root + "/" + username;
+  }
+
+  function showAccountsModal() {
+    ensureAccountsStyles();
+    var existing = document.getElementById(ACCOUNTS_MODAL_ID);
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+    var overlay = document.createElement("div");
+    overlay.id = ACCOUNTS_MODAL_ID;
+
+    var panel = document.createElement("div");
+    panel.className = "panel";
+    panel.innerHTML =
+      '<div class="hdr">' +
+        '<div>' +
+          '<div class="title">Create upload account</div>' +
+          '<div class="subtitle">Each account only sees its own folder.</div>' +
+        '</div>' +
+        '<button type="button" class="close" aria-label="Close">&times;</button>' +
+      '</div>' +
+      '<div class="body">' +
+        '<label class="label" for="droppr-account-username">Username</label>' +
+        '<input id="droppr-account-username" type="text" autocomplete="off" placeholder="letters, numbers, _ or -">' +
+        '<label class="label" for="droppr-account-password">Password</label>' +
+        '<input id="droppr-account-password" type="password" autocomplete="new-password" placeholder="at least ' + accountsPasswordMinLen + ' characters">' +
+        '<div class="note">Home folder: <span id="droppr-account-scope"></span></div>' +
+        '<div class="status" id="droppr-account-status"></div>' +
+        '<div class="actions">' +
+          '<button type="button" class="btn secondary" data-action="cancel">Cancel</button>' +
+          '<button type="button" class="btn primary" data-action="create">Create</button>' +
+        '</div>' +
+      '</div>';
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    var usernameInput = panel.querySelector("#droppr-account-username");
+    var passwordInput = panel.querySelector("#droppr-account-password");
+    var scopeLabel = panel.querySelector("#droppr-account-scope");
+    var statusEl = panel.querySelector("#droppr-account-status");
+    var closeBtn = panel.querySelector(".close");
+    var cancelBtn = panel.querySelector('[data-action="cancel"]');
+    var createBtn = panel.querySelector('[data-action="create"]');
+
+    function setStatus(text, tone) {
+      if (!statusEl) return;
+      statusEl.textContent = text || "";
+      statusEl.className = "status" + (tone ? (" " + tone) : "");
+    }
+
+    function updateScope() {
+      if (!scopeLabel || !usernameInput) return;
+      scopeLabel.textContent = formatAccountScope(String(usernameInput.value || "").trim());
+    }
+
+    function closeModal() {
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }
+
+    function submit() {
+      if (!usernameInput || !passwordInput || !createBtn) return;
+      var username = String(usernameInput.value || "").trim();
+      var password = String(passwordInput.value || "");
+
+      setStatus("", "");
+
+      if (!accountsUsernameRe.test(username)) {
+        setStatus("Username must be 3-32 characters (letters, numbers, _ or -).", "error");
+        return;
+      }
+      if (!password || password.length < accountsPasswordMinLen) {
+        setStatus("Password must be at least " + accountsPasswordMinLen + " characters.", "error");
+        return;
+      }
+
+      var token = getAuthToken();
+      if (!token) {
+        setStatus("You are not logged in.", "error");
+        return;
+      }
+
+      createBtn.disabled = true;
+      fetch("/api/droppr/users", {
+        method: "POST",
+        headers: {
+          "X-Auth": token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username: username, password: password }),
+      })
+        .then(function (res) {
+          return res.text().then(function (text) {
+            var data = null;
+            if (text) {
+              try { data = JSON.parse(text); } catch (e) { data = null; }
+            }
+            if (!res.ok) {
+              var msg = (data && data.error) ? data.error : ("Request failed (" + res.status + ")");
+              throw new Error(msg);
+            }
+            return data || {};
+          });
+        })
+        .then(function (data) {
+          var scope = data && data.scope ? data.scope : formatAccountScope(username);
+          setStatus("Account created. Folder: " + scope, "success");
+          passwordInput.value = "";
+          try { usernameInput.select(); } catch (e2) {}
+        })
+        .catch(function (err) {
+          setStatus(String(err && err.message ? err.message : err), "error");
+        })
+        .then(function () {
+          createBtn.disabled = false;
+        });
+    }
+
+    updateScope();
+    if (usernameInput && usernameInput.addEventListener) {
+      usernameInput.addEventListener("input", updateScope);
+    }
+
+    if (closeBtn) closeBtn.addEventListener("click", closeModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
+    if (overlay) {
+      overlay.addEventListener("click", function (e) {
+        if (e.target === overlay) closeModal();
+      });
+    }
+    if (panel) {
+      panel.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          submit();
+        }
+      });
+    }
+    if (createBtn) createBtn.addEventListener("click", submit);
+
+    try {
+      if (usernameInput) usernameInput.focus();
+    } catch (e3) {
+      // ignore
+    }
+  }
+
+  function ensureAccountsButton() {
+    var existing = document.getElementById(ACCOUNTS_BTN_ID);
+    if (!isLoggedIn() || !isFilesPage()) {
+      if (!isLoggedIn()) {
+        accountsAdminState = null;
+        accountsAdminCheck = null;
+      }
+      if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+      return;
+    }
+
+    if (accountsAdminState === false) {
+      if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+      return;
+    }
+
+    if (accountsAdminState == null) {
+      checkAccountsAdmin().then(function () {
+        ensureAccountsButton();
+      });
+      return;
+    }
+
+    if (existing) return;
+
+    ensureAccountsStyles();
+
+    var btn = document.createElement("button");
+    btn.id = ACCOUNTS_BTN_ID;
+    btn.type = "button";
+    btn.title = "Create upload account";
+    btn.setAttribute("aria-label", "Create upload account");
+    btn.innerHTML =
+      '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+      '<path fill="currentColor" d="M15 12c2.2 0 4-1.8 4-4s-1.8-4-4-4-4 1.8-4 4 1.8 4 4 4zm-6 0c1.7 0 3-1.3 3-3s-1.3-3-3-3-3 1.3-3 3 1.3 3 3 3zm6 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4zm-6 0c-.3 0-.8 0-1.3.1 1.8 1.2 2.3 2.7 2.3 3.9v2H2v-2c0-2 3.6-4 7-4zm11-2v-2h-2V8h-2v2h-2v2h2v2h2v-2h2z"/>' +
+      "</svg>" +
+      '<span class="label">Accounts</span>';
+
+    btn.addEventListener("click", function () {
+      showAccountsModal();
+    });
+
+    document.body.appendChild(btn);
   }
 
   // ============ STREAM GALLERY BUTTON ============
@@ -3620,6 +4040,7 @@
     patchFileInputs();
     ensureThemeToggle();
     ensureAnalyticsButton();
+    ensureAccountsButton();
     ensureShareExpireButtons();
     ensureShareDialogStreamButtons();
     ensureFilesStreamShareButton();
@@ -3627,6 +4048,7 @@
     scheduleFilesVideoHydrate();
     var observer = new MutationObserver(function () {
       ensureAnalyticsButton();
+      ensureAccountsButton();
       ensureShareExpireButtons();
       ensureShareDialogStreamButtons();
       ensureFilesStreamShareButton();
@@ -3637,6 +4059,7 @@
     filesVideoLastPathname = String(window.location && window.location.pathname);
     setInterval(function () {
       if (!isFilesPage()) return;
+      ensureAccountsButton();
       ensureFilesStreamShareButton();
       var cur = String(window.location && window.location.pathname);
       if (cur !== filesVideoLastPathname) {

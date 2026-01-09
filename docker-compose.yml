@@ -35,27 +35,6 @@ services:
     networks:
       - default
 
-  faststart:
-    build:
-      context: ./faststart
-    container_name: droppr-faststart
-    restart: unless-stopped
-    user: "1000:1000"
-    volumes:
-      - ./data:/srv
-      - ./database:/database
-    environment:
-      - WATCH_DIR=/srv
-      # Video re-encode settings (HEVC→H.264 and rare error-fix fallbacks).
-      # Lower CRF = higher quality (and larger files).
-      - DROPPR_FASTSTART_X264_PRESET=${DROPPR_FASTSTART_X264_PRESET:-slow}
-      - DROPPR_FASTSTART_X264_CRF=${DROPPR_FASTSTART_X264_CRF:-16}
-      - DROPPR_FASTSTART_AAC_BITRATE=${DROPPR_FASTSTART_AAC_BITRATE:-256k}
-      - DROPPR_FASTSTART_COPY_AUDIO=${DROPPR_FASTSTART_COPY_AUDIO:-true}
-      - DROPPR_FASTSTART_FFMPEG_TIMEOUT_SECONDS=${DROPPR_FASTSTART_FFMPEG_TIMEOUT_SECONDS:-7200}
-    depends_on:
-      - app
-
   media-server:
     build:
       context: ./media-server
@@ -65,6 +44,7 @@ services:
     user: "1000:1000"
     volumes:
       - ./database:/database
+      - ./data:/srv
     environment:
       - DROPPR_CACHE_DIR=/database/thumb-cache
       - DROPPR_THUMB_MAX_CONCURRENCY=1
@@ -75,20 +55,6 @@ services:
     networks:
       - default
 
-  cloudflared-droppr:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared-droppr
-    restart: unless-stopped
-    command: tunnel --config /etc/cloudflared/config.yml run
-    volumes:
-      - ./cloudflare/config.yml:/etc/cloudflared/config.yml:ro
-      - ./cloudflare/creds:/etc/cloudflared/creds:ro
-    depends_on:
-      - droppr
-    profiles:
-      - tunnel
-    networks:
-      - default
 
 networks:
   default:

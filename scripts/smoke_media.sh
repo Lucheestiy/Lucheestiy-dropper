@@ -3,7 +3,7 @@ set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
   echo "usage: $(basename "$0") <public-media-url>" >&2
-  echo "example: $(basename "$0") 'https://droppr.coolmri.com/api/public/dl/<share>/<file>?inline=true'" >&2
+  echo "example: $(basename "$0") 'https://droppr.lucheestiy.com/api/public/dl/<share>/<file>?inline=true'" >&2
   exit 2
 fi
 

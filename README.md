@@ -20,23 +20,6 @@ Note: the gallery caches a share for performance. If you add new files after cre
   - `DROPPR_ANALYTICS_RETENTION_DAYS=180` (set `0` to disable retention cleanup)
   - `DROPPR_ANALYTICS_IP_MODE=full|anonymized|off`
 
-## Fast Start (Better Video Streaming)
-
-Many iPhone `.mov` uploads store the `moov` atom at the end of the file, which makes browser playback feel extremely slow (it can look like the video won’t load until most of the file downloads).
-
-This stack includes a `droppr-faststart` service that automatically fixes new `.mov/.mp4/.m4v` uploads by moving `moov` to the front **without re-encoding**.
-
-Some uploads require re-encoding for compatibility (notably HEVC/H.265 → H.264). Droppr is configured to prioritize visual quality (even if the file gets larger). You can tune the encoder via env vars used by the `faststart` service:
-
-- `DROPPR_FASTSTART_X264_CRF` (default: `16`) — lower = higher quality/larger files
-- `DROPPR_FASTSTART_X264_PRESET` (default: `slow`) — slower = better compression (more CPU/time)
-- `DROPPR_FASTSTART_COPY_AUDIO` (default: `true`) — tries to copy audio stream; falls back to AAC if needed
-- `DROPPR_FASTSTART_AAC_BITRATE` (default: `256k`) — used when audio must be re-encoded
-
-## Video Metadata (Original vs Processed)
-
-Some uploads are modified by `droppr-faststart` (e.g., HEVC → H.264 transcode, timestamp fixes, or faststart). Droppr records the **original** and **post-processing** metadata (size, resolution, codecs, duration) to `./database/droppr-video-meta.sqlite3` and shows it in a small “Video details” panel when previewing a video in the File Browser UI.
-
 ## Video Quality (Fast + HD)
 
 The public gallery opens videos in `/player` and can use cached proxy MP4s (served from `/api/proxy-cache/...`) for faster reloads and seeking:
@@ -58,7 +41,7 @@ When you upload **exactly one file**, Droppr automatically creates a File Browse
 ## Start
 
 ```bash
-cd /home/mlweb/mri-cooling-droppr
+cd /home/mlweb/lucheestiy-droppr
 docker compose up -d
 ```
 
@@ -67,7 +50,6 @@ Local check:
 ```bash
 curl -sS http://localhost:8098/ >/dev/null || true
 docker logs droppr --tail 50
-docker logs droppr-faststart --tail 50
 ```
 
 On first run, File Browser will print a randomly generated admin password in the logs.
@@ -77,30 +59,41 @@ On first run, File Browser will print a randomly generated admin password in the
 Some clients rely on `HEAD` and conditional GETs for media endpoints like `/api/public/dl/...`. Droppr’s Nginx proxy normalizes these so previews and replays work reliably.
 
 ```bash
-./scripts/smoke_media.sh 'https://droppr.coolmri.com/api/public/dl/<share>/<file>?inline=true'
+./scripts/smoke_media.sh 'https://droppr.lucheestiy.com/api/public/dl/<share>/<file>?inline=true'
+```
+
+## Public URL (Proxy Droplet)
+
+Production access is handled by the proxy droplet (nginx) that forwards
+`droppr.lucheestiy.com` to the local Droppr container.
+
+Droplet SSH:
+```bash
+ssh root@97.107.142.128
+```
+
+Example (on the droplet):
+```nginx
+server {
+    server_name droppr.lucheestiy.com;
+    location / {
+        proxy_pass http://100.93.127.52:8098;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 ```
 
 ## Files Location
 
-- Upload/manage files in `./data/` (host path: `/home/mlweb/mri-cooling-droppr/data`).
+- Upload/manage files in `./data/` (host path: `/home/mlweb/lucheestiy-droppr/data`).
 - Persistent state is stored in `./database/` and `./config/`.
 
-## Public URL (Cloudflare Tunnel)
+## Accounts (Isolated Uploads)
 
-Droppr runs its own Cloudflare tunnel (separate from the production stack).
-
-Create the tunnel + config/credentials:
-
-```bash
-cd /home/mlweb/mri-cooling-droppr
-./setup-cloudflare-tunnel.sh
-```
-
-Start the tunnel container:
-
-```bash
-cd /home/mlweb/mri-cooling-droppr
-docker compose --profile tunnel up -d
-```
-
-In Cloudflare DNS, add the CNAME record printed by the setup script (`droppr` → `<TUNNEL_ID>.cfargotunnel.com`).
+- Admins can create upload-only accounts from the Droppr UI (`Accounts` button on `/files`).
+- Each account is scoped to its own folder (default: `./data/users/<username>`), with no visibility into other uploads.
+- To change the base folder, set `DROPPR_USER_ROOT` (scope inside File Browser, default `/users`) and `DROPPR_USER_DATA_DIR` (filesystem path, default `/srv`) on the `media-server` container. Password length can be adjusted with `DROPPR_USER_PASSWORD_MIN_LEN` (default `8`).
+- If a user was created via File Browser's Settings -> Users, their scope defaults to `/`. Use the Droppr Accounts button instead, or run `./scripts/fix-user-scope.sh <username>` to rescope and move `./data/<username>` into `./data/users/<username>`.
