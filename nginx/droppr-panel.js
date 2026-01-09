@@ -3855,8 +3855,14 @@
     var warning = document.createElement("div");
     warning.id = WARNING_ID;
     warning.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483002;padding:16px 24px;border-radius:12px;background:rgba(220,38,38,0.95);color:#fff;font-family:Inter,system-ui,-apple-system,sans-serif;font-size:14px;font-weight:600;box-shadow:0 10px 40px rgba(0,0,0,0.4);max-width:90vw;text-align:center;";
-    warning.innerHTML = '<div style="margin-bottom:8px;">File not ready: ' + (fileName || 'Unknown') + '</div>' +
-      '<div style="font-weight:400;font-size:12px;opacity:0.9;">Please wait for the file to download from iCloud before uploading.</div>';
+    var titleDiv = document.createElement("div");
+    titleDiv.style.marginBottom = "8px";
+    titleDiv.textContent = "File not ready: " + (fileName || "Unknown");
+    var msgDiv = document.createElement("div");
+    msgDiv.style.cssText = "font-weight:400;font-size:12px;opacity:0.9;";
+    msgDiv.textContent = "Please wait for the file to download from iCloud before uploading.";
+    warning.appendChild(titleDiv);
+    warning.appendChild(msgDiv);
 
     document.body.appendChild(warning);
 

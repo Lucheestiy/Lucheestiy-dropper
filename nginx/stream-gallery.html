@@ -1055,11 +1055,34 @@
                 const filePath = getFilePath(file);
                 const fileName = getFileName(file);
                 const progress = getVideoProgress(state.shareHash, filePath);
-                item.innerHTML = '<div class="file-thumb"><img src="' + getThumbnailUrl(state.shareHash, filePath) + '" alt="" loading="lazy" onerror="this.parentElement.innerHTML=\'&#128249;\'"></div>' +
-                    '<div class="file-info"><div class="file-name">' + fileName + '</div>' +
-                    '<div class="file-meta"><span>' + formatBytes(file.size) + '</span>' +
-                    (progress ? '<span class="resume-badge">' + formatTime(progress.time) + '</span>' : '') +
-                    '</div></div>';
+                var thumb = document.createElement('div');
+                thumb.className = 'file-thumb';
+                var img = document.createElement('img');
+                img.src = getThumbnailUrl(state.shareHash, filePath);
+                img.alt = '';
+                img.loading = 'lazy';
+                img.onerror = function() { thumb.textContent = '\uD83C\uDFA5'; };
+                thumb.appendChild(img);
+                var info = document.createElement('div');
+                info.className = 'file-info';
+                var nameDiv = document.createElement('div');
+                nameDiv.className = 'file-name';
+                nameDiv.textContent = fileName;
+                var metaDiv = document.createElement('div');
+                metaDiv.className = 'file-meta';
+                var sizeSpan = document.createElement('span');
+                sizeSpan.textContent = formatBytes(file.size);
+                metaDiv.appendChild(sizeSpan);
+                if (progress) {
+                    var resumeBadge = document.createElement('span');
+                    resumeBadge.className = 'resume-badge';
+                    resumeBadge.textContent = formatTime(progress.time);
+                    metaDiv.appendChild(resumeBadge);
+                }
+                info.appendChild(nameDiv);
+                info.appendChild(metaDiv);
+                item.appendChild(thumb);
+                item.appendChild(info);
                 item.onclick = function() { loadVideo(index); };
                 els.fileList.appendChild(item);
             });

@@ -50,7 +50,9 @@ MAX_SHARE_HASH_LENGTH = 64  # Prevent DOS via extremely long hashes
 
 # Gallery file-list caching (in-memory, per gunicorn worker)
 DEFAULT_CACHE_TTL_SECONDS = int(os.environ.get("DROPPR_SHARE_CACHE_TTL_SECONDS", "3600"))
-MAX_CACHE_SIZE = 1000  # Max number of shares to cache
+MAX_CACHE_SIZE = max(10, int(os.environ.get("DROPPR_SHARE_CACHE_SIZE", "1000")))
+MAX_CACHE_HARD_LIMIT = int(MAX_CACHE_SIZE * 1.5)  # Emergency eviction threshold
+MAX_ALIAS_DEPTH = max(1, int(os.environ.get("DROPPR_MAX_ALIAS_DEPTH", "10")))
 _share_cache_lock = threading.Lock()
 _share_files_cache: dict[tuple[str, str], tuple[float, str, bool, list[dict]]] = {}
 
@@ -92,6 +94,14 @@ def parse_bool(value) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _safe_getsize(path: str) -> int | None:
+    """Get file size, returning None if file doesn't exist (race-safe)."""
+    try:
+        return os.path.getsize(path)
+    except (OSError, FileNotFoundError):
+        return None
 
 
 def _safe_rel_path(value: str) -> str | None:
@@ -274,6 +284,7 @@ _video_meta_sema = threading.BoundedSemaphore(max(1, VIDEO_META_MAX_CONCURRENCY)
 os.makedirs(VIDEO_META_LOCK_DIR, exist_ok=True)
 
 _last_retention_sweep_at: float = 0.0
+_retention_lock = threading.Lock()
 _analytics_db_ready: bool = False
 _aliases_db_ready: bool = False
 _video_meta_db_ready: bool = False
@@ -394,29 +405,25 @@ def _ensure_analytics_db() -> None:
         os.makedirs(db_dir, exist_ok=True)
 
     lock_path = f"{ANALYTICS_DB_PATH}.init.lock"
-    lock_file = open(lock_path, "w")
-    try:
+    with open(lock_path, "w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
-
-        for attempt in range(10):
-            try:
-                _init_analytics_db()
-                _analytics_db_ready = True
-                return
-            except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and attempt < 9:
-                    time.sleep(0.05 * (attempt + 1))
-                    continue
-                app.logger.warning("Analytics init failed: %s", e)
-                return
-            except Exception as e:
-                app.logger.warning("Analytics init failed: %s", e)
-                return
-    finally:
         try:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            for attempt in range(10):
+                try:
+                    _init_analytics_db()
+                    _analytics_db_ready = True
+                    return
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e).lower() and attempt < 9:
+                        time.sleep(0.05 * (attempt + 1))
+                        continue
+                    app.logger.warning("Analytics init failed: %s", e)
+                    return
+                except Exception as e:
+                    app.logger.warning("Analytics init failed: %s", e)
+                    return
         finally:
-            lock_file.close()
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 @contextmanager
@@ -487,29 +494,25 @@ def _ensure_aliases_db() -> None:
         os.makedirs(db_dir, exist_ok=True)
 
     lock_path = f"{ALIASES_DB_PATH}.init.lock"
-    lock_file = open(lock_path, "w")
-    try:
+    with open(lock_path, "w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
-
-        for attempt in range(10):
-            try:
-                _init_aliases_db()
-                _aliases_db_ready = True
-                return
-            except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and attempt < 9:
-                    time.sleep(0.05 * (attempt + 1))
-                    continue
-                app.logger.warning("Aliases init failed: %s", e)
-                return
-            except Exception as e:
-                app.logger.warning("Aliases init failed: %s", e)
-                return
-    finally:
         try:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            for attempt in range(10):
+                try:
+                    _init_aliases_db()
+                    _aliases_db_ready = True
+                    return
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e).lower() and attempt < 9:
+                        time.sleep(0.05 * (attempt + 1))
+                        continue
+                    app.logger.warning("Aliases init failed: %s", e)
+                    return
+                except Exception as e:
+                    app.logger.warning("Aliases init failed: %s", e)
+                    return
         finally:
-            lock_file.close()
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def _init_video_meta_db() -> None:
@@ -560,29 +563,25 @@ def _ensure_video_meta_db() -> None:
         os.makedirs(db_dir, exist_ok=True)
 
     lock_path = f"{VIDEO_META_DB_PATH}.init.lock"
-    lock_file = open(lock_path, "w")
-    try:
+    with open(lock_path, "w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
-
-        for attempt in range(10):
-            try:
-                _init_video_meta_db()
-                _video_meta_db_ready = True
-                return
-            except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and attempt < 9:
-                    time.sleep(0.05 * (attempt + 1))
-                    continue
-                app.logger.warning("Video meta init failed: %s", e)
-                return
-            except Exception as e:
-                app.logger.warning("Video meta init failed: %s", e)
-                return
-    finally:
         try:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            for attempt in range(10):
+                try:
+                    _init_video_meta_db()
+                    _video_meta_db_ready = True
+                    return
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e).lower() and attempt < 9:
+                        time.sleep(0.05 * (attempt + 1))
+                        continue
+                    app.logger.warning("Video meta init failed: %s", e)
+                    return
+                except Exception as e:
+                    app.logger.warning("Video meta init failed: %s", e)
+                    return
         finally:
-            lock_file.close()
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 @contextmanager
@@ -976,9 +975,6 @@ def _ensure_video_meta_record(
             return _fetch_video_meta_row(conn, db_path)
 
 
-MAX_ALIAS_DEPTH = 10
-
-
 def _resolve_share_hash(share_hash: str) -> str:
     if not is_valid_share_hash(share_hash):
         return share_hash
@@ -999,7 +995,8 @@ def _resolve_share_hash(share_hash: str) -> str:
                     break
                 visited.add(nxt)
                 current = nxt
-    except Exception:
+    except Exception as e:
+        app.logger.debug("Alias resolution failed for %s: %s", share_hash, e)
         return share_hash
 
     return current
@@ -1061,14 +1058,16 @@ def _maybe_apply_retention(conn: sqlite3.Connection) -> None:
         return
 
     now = time.time()
-    if now - _last_retention_sweep_at < 3600:
-        return
+    with _retention_lock:
+        if now - _last_retention_sweep_at < 3600:
+            return
+        _last_retention_sweep_at = now
 
     cutoff = int(now - (ANALYTICS_RETENTION_DAYS * 86400))
     try:
         conn.execute("DELETE FROM download_events WHERE created_at < ?", (cutoff,))
-    finally:
-        _last_retention_sweep_at = now
+    except Exception as e:
+        app.logger.warning("Retention sweep failed: %s", e)
 
 
 def _should_log_event(event_type: str) -> bool:
@@ -1131,7 +1130,7 @@ def _get_auth_token() -> str | None:
 
 
 def _validate_filebrowser_admin(token: str) -> int | None:
-    resp = requests.get(f"{FILEBROWSER_BASE_URL}/api/users", headers={"X-Auth": token}, timeout=10)
+    resp = requests.get(f"{FILEBROWSER_BASE_URL}/api/users", headers={"X-Auth": token}, timeout=(5, 30))
     if resp.status_code in {401, 403}:
         return resp.status_code
     resp.raise_for_status()
@@ -1147,12 +1146,15 @@ def _create_filebrowser_share(*, token: str, path_encoded: str, hours: int) -> d
         f"{FILEBROWSER_BASE_URL}/api/share{path_encoded}",
         headers={"X-Auth": token, "Content-Type": "application/json"},
         json=body,
-        timeout=10,
+        timeout=(5, 30),
     )
     if resp.status_code in {401, 403}:
         raise PermissionError("Unauthorized")
     resp.raise_for_status()
-    data = resp.json()
+    try:
+        data = resp.json()
+    except (ValueError, json.JSONDecodeError):
+        return {}
     return data if isinstance(data, dict) else {}
 
 
@@ -1162,7 +1164,7 @@ def _create_filebrowser_user(*, token: str, username: str, password: str, scope:
         f"{FILEBROWSER_BASE_URL}/api/users",
         headers={"X-Auth": token, "Content-Type": "application/json"},
         json=payload,
-        timeout=10,
+        timeout=(5, 30),
     )
     if resp.status_code in {401, 403}:
         raise PermissionError("Unauthorized")
@@ -1172,12 +1174,12 @@ def _create_filebrowser_user(*, token: str, username: str, password: str, scope:
         try:
             data = resp.json()
             msg = data.get("error") or data.get("message")
-        except Exception:
+        except (ValueError, json.JSONDecodeError):
             msg = None
         raise RuntimeError(msg or f"User API failed ({resp.status_code})")
     try:
         data = resp.json()
-    except Exception:
+    except (ValueError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -1190,7 +1192,7 @@ def _fetch_filebrowser_shares(token: str) -> list[dict]:
     return []
 
     # Original code commented out:
-    # resp = requests.get(FILEBROWSER_SHARES_API, headers={"X-Auth": token}, timeout=10)
+    # resp = requests.get(FILEBROWSER_SHARES_API, headers={"X-Auth": token}, timeout=(5, 30))
     # if resp.status_code in {401, 403}:
     #     raise PermissionError("Unauthorized")
     # resp.raise_for_status()
@@ -1233,11 +1235,14 @@ def _fetch_public_share_json(share_hash: str, subpath: str | None = None) -> dic
     else:
         url = f"{FILEBROWSER_PUBLIC_SHARE_API}/{share_hash}"
 
-    resp = requests.get(url, timeout=10)
+    resp = requests.get(url, timeout=(5, 30))
     if resp.status_code == 404:
         return None
     resp.raise_for_status()
-    data = resp.json()
+    try:
+        data = resp.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
     return data if isinstance(data, dict) else None
 
 
@@ -1248,13 +1253,16 @@ def _fetch_filebrowser_resource(path: str, token: str) -> dict | None:
 
     encoded = quote(safe_path.lstrip("/"), safe="/")
     url = f"{FILEBROWSER_BASE_URL}/api/resources/{encoded}"
-    resp = requests.get(url, headers={"X-Auth": token}, timeout=10)
+    resp = requests.get(url, headers={"X-Auth": token}, timeout=(5, 30))
     if resp.status_code == 404:
         return None
     if resp.status_code in {401, 403}:
         raise PermissionError("Unauthorized")
     resp.raise_for_status()
-    data = resp.json()
+    try:
+        data = resp.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
     return data if isinstance(data, dict) else None
 
 
@@ -1291,7 +1299,9 @@ def _build_folder_share_file_list(
         files.append(item)
 
     if recursive:
-        while dirs_to_scan:
+        MAX_RECURSIVE_DIRS = 500  # Prevent DoS via deeply nested directories
+        MAX_RECURSIVE_FILES = 10000  # Prevent memory exhaustion
+        while dirs_to_scan and len(visited_dirs) < MAX_RECURSIVE_DIRS and len(files) < MAX_RECURSIVE_FILES:
             dir_path = dirs_to_scan.pop()
             if dir_path in visited_dirs:
                 continue
@@ -1313,6 +1323,8 @@ def _build_folder_share_file_list(
                         dirs_to_scan.append(path)
                     continue
                 files.append(item)
+                if len(files) >= MAX_RECURSIVE_FILES:
+                    break
 
     # Normalize, remove directories, and enrich with URLs
     result = []
@@ -1407,10 +1419,19 @@ def _get_share_files(
         files = _build_file_share_file_list(request_hash=request_hash, source_hash=source_hash, meta=data)
 
     with _share_cache_lock:
-        if len(_share_files_cache) >= MAX_CACHE_SIZE:
-            # Simple eviction strategy: clear the whole cache if it gets too big.
-            # A more sophisticated LRU is possible but likely overkill for this scale.
-            _share_files_cache.clear()
+        cache_len = len(_share_files_cache)
+        if cache_len >= MAX_CACHE_HARD_LIMIT:
+            # Emergency eviction: clear 50% when hard limit reached
+            entries = sorted(_share_files_cache.items(), key=lambda x: x[1][0])
+            evict_count = max(1, len(entries) // 2)
+            for key, _ in entries[:evict_count]:
+                _share_files_cache.pop(key, None)
+        elif cache_len >= MAX_CACHE_SIZE:
+            # Normal LRU eviction: remove oldest 25% of entries to avoid thundering herd
+            entries = sorted(_share_files_cache.items(), key=lambda x: x[1][0])
+            evict_count = max(1, len(entries) // 4)
+            for key, _ in entries[:evict_count]:
+                _share_files_cache.pop(key, None)
         _share_files_cache[cache_key] = (now, source_hash, recursive, files)
 
     return files
@@ -1491,36 +1512,36 @@ def serve_file(share_hash: str, filename: str):
 CACHE_DIR = os.environ.get("DROPPR_CACHE_DIR", "/tmp/thumbnails")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-THUMB_MAX_WIDTH = int(os.environ.get("DROPPR_THUMB_MAX_WIDTH", "800"))
-THUMB_JPEG_QUALITY = int(os.environ.get("DROPPR_THUMB_JPEG_QUALITY", "6"))
-THUMB_FFMPEG_TIMEOUT_SECONDS = int(os.environ.get("DROPPR_THUMB_FFMPEG_TIMEOUT_SECONDS", "25"))
-THUMB_MAX_CONCURRENCY = int(os.environ.get("DROPPR_THUMB_MAX_CONCURRENCY", "2"))
-_thumb_sema = threading.BoundedSemaphore(max(1, THUMB_MAX_CONCURRENCY))
+THUMB_MAX_WIDTH = max(1, int(os.environ.get("DROPPR_THUMB_MAX_WIDTH", "800")))
+THUMB_JPEG_QUALITY = max(1, min(31, int(os.environ.get("DROPPR_THUMB_JPEG_QUALITY", "6"))))
+THUMB_FFMPEG_TIMEOUT_SECONDS = max(1, int(os.environ.get("DROPPR_THUMB_FFMPEG_TIMEOUT_SECONDS", "25")))
+THUMB_MAX_CONCURRENCY = max(1, int(os.environ.get("DROPPR_THUMB_MAX_CONCURRENCY", "2")))
+_thumb_sema = threading.BoundedSemaphore(THUMB_MAX_CONCURRENCY)
 
 PROXY_CACHE_DIR = os.environ.get("DROPPR_PROXY_CACHE_DIR", "/tmp/proxy-cache")
 os.makedirs(PROXY_CACHE_DIR, exist_ok=True)
 
-PROXY_MAX_CONCURRENCY = int(os.environ.get("DROPPR_PROXY_MAX_CONCURRENCY", "1"))
-_proxy_sema = threading.BoundedSemaphore(max(1, PROXY_MAX_CONCURRENCY))
+PROXY_MAX_CONCURRENCY = max(1, int(os.environ.get("DROPPR_PROXY_MAX_CONCURRENCY", "1")))
+_proxy_sema = threading.BoundedSemaphore(PROXY_MAX_CONCURRENCY)
 
 _background_lock = threading.Lock()
 _background_tasks: set[str] = set()
 
-PROXY_MAX_DIMENSION = int(os.environ.get("DROPPR_PROXY_MAX_DIMENSION", "1280"))
+PROXY_MAX_DIMENSION = max(1, int(os.environ.get("DROPPR_PROXY_MAX_DIMENSION", "1280")))
 PROXY_H264_PRESET = os.environ.get("DROPPR_PROXY_H264_PRESET", "veryfast")
-PROXY_CRF = int(os.environ.get("DROPPR_PROXY_CRF", "28"))
+PROXY_CRF = max(0, min(51, int(os.environ.get("DROPPR_PROXY_CRF", "28"))))
 PROXY_AAC_BITRATE = os.environ.get("DROPPR_PROXY_AAC_BITRATE", "128k")
-PROXY_FFMPEG_TIMEOUT_SECONDS = int(os.environ.get("DROPPR_PROXY_FFMPEG_TIMEOUT_SECONDS", "900"))
+PROXY_FFMPEG_TIMEOUT_SECONDS = max(1, int(os.environ.get("DROPPR_PROXY_FFMPEG_TIMEOUT_SECONDS", "900")))
 PROXY_PROFILE_VERSION = os.environ.get("DROPPR_PROXY_PROFILE_VERSION", "1")
 
-HD_MAX_CONCURRENCY = int(os.environ.get("DROPPR_HD_MAX_CONCURRENCY", "1"))
-_hd_sema = threading.BoundedSemaphore(max(1, HD_MAX_CONCURRENCY))
+HD_MAX_CONCURRENCY = max(1, int(os.environ.get("DROPPR_HD_MAX_CONCURRENCY", "1")))
+_hd_sema = threading.BoundedSemaphore(HD_MAX_CONCURRENCY)
 
-HD_MAX_DIMENSION = int(os.environ.get("DROPPR_HD_MAX_DIMENSION", "0"))
+HD_MAX_DIMENSION = max(0, int(os.environ.get("DROPPR_HD_MAX_DIMENSION", "0")))  # 0 = disabled
 HD_H264_PRESET = os.environ.get("DROPPR_HD_H264_PRESET", "veryfast")
-HD_CRF = int(os.environ.get("DROPPR_HD_CRF", "20"))
+HD_CRF = max(0, min(51, int(os.environ.get("DROPPR_HD_CRF", "20"))))
 HD_AAC_BITRATE = os.environ.get("DROPPR_HD_AAC_BITRATE", "192k")
-HD_FFMPEG_TIMEOUT_SECONDS = int(os.environ.get("DROPPR_HD_FFMPEG_TIMEOUT_SECONDS", "1800"))
+HD_FFMPEG_TIMEOUT_SECONDS = max(1, int(os.environ.get("DROPPR_HD_FFMPEG_TIMEOUT_SECONDS", "1800")))
 HD_PROFILE_VERSION = os.environ.get("DROPPR_HD_PROFILE_VERSION", "1")
 
 def _get_cache_path(share_hash: str, filename: str) -> str:
@@ -1641,15 +1662,17 @@ def _ensure_fast_proxy_mp4(
     output_path = os.path.join(PROXY_CACHE_DIR, f"{cache_key}.mp4")
     public_url = f"/api/proxy-cache/{cache_key}.mp4"
 
-    if os.path.exists(output_path):
-        return cache_key, output_path, public_url, os.path.getsize(output_path)
+    cached_size = _safe_getsize(output_path)
+    if cached_size is not None:
+        return cache_key, output_path, public_url, cached_size
 
     lock_path = output_path + ".lock"
     with open(lock_path, "w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-        if os.path.exists(output_path):
-            return cache_key, output_path, public_url, os.path.getsize(output_path)
+        cached_size = _safe_getsize(output_path)
+        if cached_size is not None:
+            return cache_key, output_path, public_url, cached_size
 
         tmp_path = output_path + ".tmp"
         try:
@@ -1802,15 +1825,17 @@ def _ensure_hd_mp4(
     output_path = os.path.join(PROXY_CACHE_DIR, f"{cache_key}.mp4")
     public_url = f"/api/proxy-cache/{cache_key}.mp4"
 
-    if os.path.exists(output_path):
-        return cache_key, output_path, public_url, os.path.getsize(output_path)
+    cached_size = _safe_getsize(output_path)
+    if cached_size is not None:
+        return cache_key, output_path, public_url, cached_size
 
     lock_path = output_path + ".lock"
     with open(lock_path, "w") as lock_file:
         fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-        if os.path.exists(output_path):
-            return cache_key, output_path, public_url, os.path.getsize(output_path)
+        cached_size = _safe_getsize(output_path)
+        if cached_size is not None:
+            return cache_key, output_path, public_url, cached_size
 
         tmp_path = output_path + ".tmp"
         try:
@@ -2177,13 +2202,13 @@ def share_video_meta(share_hash: str, filename: str):
     try:
         if row["original_meta_json"]:
             original_meta = json.loads(row["original_meta_json"])
-    except Exception:
+    except (ValueError, json.JSONDecodeError, TypeError):
         original_meta = None
 
     try:
         if row["processed_meta_json"]:
             processed_meta = json.loads(row["processed_meta_json"])
-    except Exception:
+    except (ValueError, json.JSONDecodeError, TypeError):
         processed_meta = None
 
     recorded = bool(original_meta or processed_meta)
@@ -2262,7 +2287,8 @@ def droppr_users():
     try:
         status = _validate_filebrowser_admin(token)
     except Exception as e:
-        return jsonify({"error": f"Failed to validate auth: {e}"}), 502
+        app.logger.error(f"Auth validation error: {e}")
+        return jsonify({"error": "Authentication service unavailable"}), 502
 
     if status is not None:
         return jsonify({"error": "Unauthorized"}), status
@@ -2328,7 +2354,8 @@ def droppr_update_share_expire(share_hash: str):
     try:
         status = _validate_filebrowser_admin(token)
     except Exception as e:
-        return jsonify({"error": f"Failed to validate auth: {e}"}), 502
+        app.logger.error(f"Auth validation error: {e}")
+        return jsonify({"error": "Authentication service unavailable"}), 502
 
     if status is not None:
         return jsonify({"error": "Unauthorized"}), status
@@ -2399,7 +2426,8 @@ def droppr_list_share_aliases():
     try:
         status = _validate_filebrowser_admin(token)
     except Exception as e:
-        return jsonify({"error": f"Failed to validate auth: {e}"}), 502
+        app.logger.error(f"Auth validation error: {e}")
+        return jsonify({"error": "Authentication service unavailable"}), 502
 
     if status is not None:
         return jsonify({"error": "Unauthorized"}), status
@@ -2425,7 +2453,8 @@ def droppr_video_meta():
     try:
         status = _validate_filebrowser_admin(token)
     except Exception as e:
-        return jsonify({"error": f"Failed to validate auth: {e}"}), 502
+        app.logger.error(f"Auth validation error: {e}")
+        return jsonify({"error": "Authentication service unavailable"}), 502
 
     if status is not None:
         return jsonify({"error": "Unauthorized"}), status
@@ -2476,13 +2505,13 @@ def droppr_video_meta():
     try:
         if row["original_meta_json"]:
             original_meta = json.loads(row["original_meta_json"])
-    except Exception:
+    except (ValueError, json.JSONDecodeError, TypeError):
         original_meta = None
 
     try:
         if row["processed_meta_json"]:
             processed_meta = json.loads(row["processed_meta_json"])
-    except Exception:
+    except (ValueError, json.JSONDecodeError, TypeError):
         processed_meta = None
 
     resp = jsonify(
@@ -2512,7 +2541,8 @@ def droppr_preview():
     try:
         status = _validate_filebrowser_admin(token)
     except Exception as e:
-        return jsonify({"error": f"Failed to validate auth: {e}"}), 502
+        app.logger.error(f"Auth validation error: {e}")
+        return jsonify({"error": "Authentication service unavailable"}), 502
 
     if status is not None:
         return jsonify({"error": "Unauthorized"}), status
@@ -2626,7 +2656,8 @@ def analytics_config():
     except PermissionError:
         return jsonify({"error": "Unauthorized"}), 401
     except Exception as e:
-        return jsonify({"error": f"Failed to validate auth: {e}"}), 502
+        app.logger.error(f"Auth validation error: {e}")
+        return jsonify({"error": "Authentication service unavailable"}), 502
 
     return jsonify(
         {
@@ -2654,7 +2685,8 @@ def analytics_shares():
     except PermissionError:
         return jsonify({"error": "Unauthorized"}), 401
     except Exception as e:
-        return jsonify({"error": f"Failed to fetch FileBrowser shares: {e}"}), 502
+        app.logger.error(f"FileBrowser shares fetch error: {e}")
+        return jsonify({"error": "Failed to fetch shares"}), 502
 
     include_empty = parse_bool(request.args.get("include_empty") or request.args.get("includeEmpty") or "true")
     since, until = _get_time_range()
@@ -2785,7 +2817,8 @@ def analytics_share_detail(share_hash: str):
     except PermissionError:
         return jsonify({"error": "Unauthorized"}), 401
     except Exception as e:
-        return jsonify({"error": f"Failed to fetch FileBrowser shares: {e}"}), 502
+        app.logger.error(f"FileBrowser shares fetch error: {e}")
+        return jsonify({"error": "Failed to fetch shares"}), 502
 
     share_info = next((s for s in filebrowser_shares if s.get("hash") == share_hash), None)
     since, until = _get_time_range()
@@ -2886,7 +2919,8 @@ def analytics_share_export_csv(share_hash: str):
     except PermissionError:
         return "Unauthorized", 401
     except Exception as e:
-        return f"Failed to validate auth: {e}", 502
+        app.logger.error(f"Auth validation error: {e}")
+        return "Authentication service unavailable", 502
 
     since, until = _get_time_range()
 
@@ -2904,7 +2938,11 @@ def analytics_share_export_csv(share_hash: str):
     def esc(value):
         if value is None:
             return ""
-        value = str(value).replace('"', '""')
+        value = str(value)
+        # Prevent CSV formula injection by prefixing dangerous characters
+        if value and value[0] in "=+-@\t":
+            value = "'" + value
+        value = value.replace('"', '""')
         if any(c in value for c in [",", "\n", "\r", '"']):
             return f"\"{value}\""
         return value
